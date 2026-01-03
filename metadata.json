@@ -1,0 +1,15 @@
+{
+  "name": "Trippin' TV",
+  "short_name": "TrippinTV",
+  "description": "The ultimate viral video feed. Vote, upload, and win weekly prizes on the wildest network on the internet.",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#000000",
+  "orientation": "portrait",
+  "scope": "/",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
