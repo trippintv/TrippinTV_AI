@@ -1,20 +1,42 @@
 
 import React, { useState } from 'react';
+import { GoogleLogin } from '@react-oauth/google';
+import { User } from '../types';
 
 interface AuthModalProps {
   onClose: () => void;
   onLogin: (username: string) => void;
+  onGoogleLogin: (userData: User) => void;
 }
 
-const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin }) => {
+const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin, onGoogleLogin }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (username.trim()) {
       onLogin(username);
+    }
+  };
+
+  const handleGoogleSuccess = async (credentialResponse: any) => {
+    setIsProcessing(true);
+    try {
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: credentialResponse.credential })
+      });
+      if (!res.ok) throw new Error("Google auth failed");
+      const userData = await res.json();
+      onGoogleLogin(userData);
+    } catch (err) {
+      alert("Google Login Failed. Please try again.");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -37,6 +59,22 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin }) => {
           <p className="text-zinc-400 text-sm">
             {isLogin ? 'Ready to see who\'s trippin\' today?' : 'Start uploading and win weekly prizes!'}
           </p>
+        </div>
+
+        {/* Google Login Button */}
+        <div className="flex justify-center mb-6">
+          <GoogleLogin
+            onSuccess={handleGoogleSuccess}
+            onError={() => alert('Login Failed')}
+            theme="filled_black"
+            shape="pill"
+            text={isLogin ? 'signin_with' : 'signup_with'}
+          />
+        </div>
+
+        <div className="relative flex items-center justify-center mb-6">
+          <div className="border-t border-zinc-800 w-full"></div>
+          <span className="bg-zinc-900 px-4 text-zinc-500 text-[10px] font-bold uppercase tracking-widest absolute">OR</span>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -64,17 +102,12 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin }) => {
             />
           </div>
 
-          {isLogin && (
-            <div className="text-right">
-              <button type="button" className="text-xs text-purple-400 hover:underline">Forgot Password?</button>
-            </div>
-          )}
-
           <button 
             type="submit"
-            className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-purple-600/20 transition-all active:scale-[0.98] mt-4"
+            disabled={isProcessing}
+            className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-4 rounded-2xl shadow-lg shadow-purple-600/20 transition-all active:scale-[0.98] mt-4 disabled:opacity-50"
           >
-            {isLogin ? 'Log In' : 'Create Account'}
+            {isProcessing ? 'Processing...' : (isLogin ? 'Log In' : 'Create Account')}
           </button>
         </form>
 

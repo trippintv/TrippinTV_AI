@@ -3,6 +3,7 @@ export interface User {
   id: string;
   username: string;
   avatar: string;
+  bio?: string;
   isLoggedIn: boolean;
   hasAgreedToDisclaimer: boolean;
   points: number;
@@ -31,4 +32,18 @@ export interface Video {
   hasVoted?: boolean;
 }
 
-export type ViewType = 'feed' | 'leaderboard' | 'profile' | 'upload';
+export interface Message {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface Chat {
+  id: string;
+  participants: [string, string];
+  messages: Message[];
+}
+
+export type ViewType = 'feed' | 'leaderboard' | 'profile' | 'upload' | 'chat';

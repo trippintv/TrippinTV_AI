@@ -10,9 +10,10 @@ interface NavbarProps {
   onViewChange: (view: ViewType) => void;
   currentView: ViewType;
   onLogout: () => void;
+  unreadChat?: boolean;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onViewChange, currentView, onLogout }) => {
+const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onViewChange, currentView, onLogout, unreadChat }) => {
   return (
     <nav className="sticky top-0 z-50 bg-black/80 backdrop-blur-md border-b border-zinc-800 px-4 md:px-8 py-3 flex justify-between items-center">
       <div 
@@ -40,6 +41,18 @@ const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onVie
         >
           Leaderboard
         </button>
+
+        {user && (
+          <button 
+            onClick={() => onViewChange('chat')}
+            className={`hidden md:block px-4 py-2 rounded-full text-sm font-bold tracking-tight transition-all hover:scale-105 relative ${currentView === 'chat' ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)]' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+          >
+            Chat
+            {unreadChat && (
+              <div className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-black animate-pulse"></div>
+            )}
+          </button>
+        )}
 
         {user ? (
           <div className="flex items-center gap-3">
@@ -82,9 +95,9 @@ const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onVie
         ) : (
           <button 
             onClick={onAuthClick}
-            className="bg-gradient-to-r from-purple-600 to-pink-600 hover:brightness-110 text-white px-6 py-2.5 rounded-full text-sm font-black tracking-widest transition-all hover:scale-105 shadow-lg shadow-purple-600/20 active:scale-95"
+            className="bg-gradient-to-r from-purple-600 to-pink-600 hover:brightness-110 text-white px-6 py-2.5 rounded-full text-xs font-black tracking-widest transition-all hover:scale-105 shadow-lg shadow-purple-600/20 active:scale-95"
           >
-            LOG IN
+            LOGIN OR CREATE ACCOUNT
           </button>
         )}
       </div>

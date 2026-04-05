@@ -1,37 +1,32 @@
+/**
+ * Frontend interface for AI services.
+ * Now proxies requests to the Express backend.
+ */
 
-import { GoogleGenAI } from "@google/genai";
-
-const getAI = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+export const moderateContent = async (text: string, contentType: string): Promise<{ safe: boolean; reason?: string }> => {
+  try {
+    const response = await fetch('/api/safety/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, contentType })
+    });
+    if (!response.ok) return { safe: true };
+    return await response.json();
+  } catch (error) {
+    return { safe: true };
+  }
 };
 
 export const generateFunnyCaption = async (description: string): Promise<string> => {
   try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Generate a funny, street-slang, "trippin" style caption for a video described as: "${description}". Keep it short and viral.`,
-      config: {
-        temperature: 0.8,
-        maxOutputTokens: 100,
-      }
+    const response = await fetch('/api/ai/caption', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description })
     });
-    return response.text?.trim() || "Someone's trippin' hard! 😂";
+    const data = await response.json();
+    return data.caption || "Someone's trippin' hard! 😂";
   } catch (error) {
-    console.error("Gemini Error:", error);
     return "This one's wild! #TrippinTV";
-  }
-};
-
-export const moderateComment = async (comment: string): Promise<boolean> => {
-  try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Determine if this comment is safe for a community video feed. No hate speech or extreme vulgarity. Respond with ONLY 'SAFE' or 'UNSAFE'. Comment: "${comment}"`,
-    });
-    return response.text?.includes('SAFE') ?? true;
-  } catch (error) {
-    return true;
   }
 };

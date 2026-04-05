@@ -7,8 +7,9 @@ interface DisclaimerOverlayProps {
 
 const DisclaimerOverlay: React.FC<DisclaimerOverlayProps> = ({ onAgree }) => {
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl">
-      <div className="w-full max-w-xl bg-zinc-900 border border-zinc-800 rounded-[40px] p-10 text-center shadow-[0_0_100px_rgba(147,51,234,0.15)]">
+    <div className="fixed inset-0 z-[200] bg-black/95 backdrop-blur-xl overflow-y-auto">
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="w-full max-w-xl bg-zinc-900 border border-zinc-800 rounded-[40px] p-10 text-center shadow-[0_0_100px_rgba(147,51,234,0.15)]">
         <div className="w-20 h-20 bg-purple-600 rounded-full flex items-center justify-center mx-auto mb-8 animate-bounce shadow-lg shadow-purple-600/50">
           <ShieldIcon className="w-10 h-10" />
         </div>
@@ -43,6 +44,7 @@ const DisclaimerOverlay: React.FC<DisclaimerOverlayProps> = ({ onAgree }) => {
         >
           I AGREE & UNDERSTAND
         </button>
+      </div>
       </div>
     </div>
   );

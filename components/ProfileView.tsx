@@ -1,6 +1,8 @@
 
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { User, Video } from '../types';
+import { moderateContent } from '../services/geminiService';
+import ReportModal from './ReportModal';
 
 interface ProfileViewProps {
   user: User;
@@ -10,6 +12,10 @@ interface ProfileViewProps {
 
 const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isEditingBio, setIsEditingBio] = useState(false);
+  const [bioText, setBioText] = useState(user.bio || "I'm here to find the wildest trips on the internet. Follow me for daily madness! 🔥");
+  const [isModerating, setIsModerating] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const totalTrips = videos.reduce((acc, v) => acc + v.trips, 0);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -26,6 +32,18 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleSaveBio = async () => {
+    setIsModerating(true);
+    const result = await moderateContent(bioText, 'bio');
+    if (result.safe) {
+      onUpdateUser({ bio: bioText });
+      setIsEditingBio(false);
+    } else {
+      alert(`Safety Alert: Your bio was flagged. ${result.reason}`);
+    }
+    setIsModerating(false);
   };
 
   return (
@@ -62,12 +80,20 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
         <div className="flex-1 text-center md:text-left">
           <div className="flex flex-col md:flex-row md:items-center gap-4 mb-4">
             <h2 className="bungee text-3xl md:text-4xl">@{user.username}</h2>
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="bg-zinc-800 hover:bg-zinc-700 px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all hover:scale-105 active:scale-95"
-            >
-              Update Photo
-            </button>
+            <div className="flex gap-2 justify-center md:justify-start">
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="bg-zinc-800 hover:bg-zinc-700 px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all hover:scale-105 active:scale-95"
+              >
+                Update Photo
+              </button>
+              <button 
+                onClick={() => setIsReportModalOpen(true)}
+                className="bg-red-900/20 hover:bg-red-900/40 text-red-500 border border-red-500/30 px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all hover:scale-105"
+              >
+                Report
+              </button>
+            </div>
           </div>
           
           <div className="flex justify-center md:justify-start gap-8 mb-6">
@@ -88,9 +114,43 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
             </div>
           </div>
           
-          <p className="text-zinc-400 text-sm max-w-md">
-            I'm here to find the wildest trips on the internet. Follow me for daily madness! 🔥
-          </p>
+          {isEditingBio ? (
+            <div className="flex flex-col gap-2">
+              <textarea 
+                value={bioText}
+                onChange={(e) => setBioText(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-purple-500 w-full max-w-md"
+                rows={3}
+              />
+              <div className="flex gap-2">
+                <button 
+                  onClick={handleSaveBio}
+                  disabled={isModerating}
+                  className="bg-purple-600 hover:bg-purple-500 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-50"
+                >
+                  {isModerating ? 'SCANNING...' : 'Save Bio'}
+                </button>
+                <button 
+                  onClick={() => { setIsEditingBio(false); setBioText(user.bio || ""); }}
+                  className="bg-zinc-700 hover:bg-zinc-600 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="group relative max-w-md">
+              <p className="text-zinc-400 text-sm italic">
+                {user.bio || "I'm here to find the wildest trips on the internet. Follow me for daily madness! 🔥"}
+              </p>
+              <button 
+                onClick={() => setIsEditingBio(true)}
+                className="mt-2 text-[10px] text-purple-400 font-black uppercase tracking-widest hover:text-purple-300 transition-colors"
+              >
+                Edit Bio
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -144,6 +204,16 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
           </div>
         )}
       </div>
+
+      {/* Report Modal */}
+      {isReportModalOpen && (
+        <ReportModal 
+          onClose={() => setIsReportModalOpen(false)}
+          contentTitle={`User: @${user.username}`}
+          category="user"
+          reporter="Current User"
+        />
+      )}
     </div>
   );
 };

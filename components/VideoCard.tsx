@@ -1,7 +1,8 @@
 
 import React, { useState, useRef } from 'react';
 import { Video, User, Comment } from '../types';
-import { moderateComment } from '../services/geminiService';
+import { moderateContent } from '../services/geminiService';
+import ReportModal from './ReportModal';
 
 interface VideoCardProps {
   video: Video;
@@ -15,6 +16,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showTapOverlay, setShowTapOverlay] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastTap = useRef<number>(0);
@@ -52,8 +54,10 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
   const handlePostComment = async () => {
     if (!commentText.trim() || !user) return;
     setIsAiProcessing(true);
-    const isSafe = await moderateComment(commentText);
-    if (isSafe) {
+    
+    // AI Safety Check
+    const result = await moderateContent(commentText, 'comment');
+    if (result.safe) {
       const newComment: Comment = {
         id: Math.random().toString(36).substr(2, 9),
         userId: user.id,
@@ -65,7 +69,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
       onComment(video.id, newComment);
       setCommentText('');
     } else {
-      alert("Whoa! Keep it clean.");
+      alert(`Safety Alert: Comment blocked. ${result.reason}`);
     }
     setIsAiProcessing(false);
   };
@@ -140,6 +144,17 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
             </button>
             <span className="text-xs font-bold drop-shadow-md">Full</span>
           </div>
+
+          <div className="flex flex-col items-center gap-1 pt-2">
+            <button 
+              onClick={() => setIsReportModalOpen(true)}
+              className="p-3 rounded-full bg-red-900/40 hover:bg-red-900 transition-all group"
+              title="Report this video"
+            >
+              <ReportIcon className="w-7 h-7 text-red-500 group-hover:text-red-400" />
+            </button>
+            <span className="text-[8px] font-black text-red-500 drop-shadow-md">REPORT</span>
+          </div>
         </div>
 
         {/* Info Overlay */}
@@ -202,6 +217,16 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
           )}
         </div>
       )}
+
+      {/* Report Modal */}
+      {isReportModalOpen && (
+        <ReportModal 
+          onClose={() => setIsReportModalOpen(false)}
+          contentTitle={`Video: ${video.title} (by @${video.username})`}
+          category="video_content"
+          reporter={user?.username || 'Anonymous'}
+        />
+      )}
     </div>
   );
 };
@@ -221,5 +246,6 @@ const ChatIcon = ({className}: {className:string}) => <svg className={className}
 const ShareIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>;
 const SendIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>;
 const FullscreenIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>;
+const ReportIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>;
 
 export default VideoCard;
