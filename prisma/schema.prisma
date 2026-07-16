@@ -16,7 +16,7 @@ model User {
   bio                   String?
   points                Int            @default(0)
   hasAgreedToDisclaimer Boolean        @default(false)
-  isLoggedIn            Boolean        @default(false)
+  isAdmin               Boolean        @default(false)
   videos                Video[]
   comments              Comment[]
   sentMessages          Message[]      @relation("SentMessages")

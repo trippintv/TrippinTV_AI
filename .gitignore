@@ -285,6 +285,19 @@ FakesAssemblies/
 .ntvs_analysis.dat
 node_modules/
 
+# Local env / secrets
+.env
+.env.local
+
+# Build output
+dist/
+
+# Tooling / generated config
+.agents/
+.gemini/
+GEMINI.md
+skills-lock.json
+
 # Visual Studio 6 build log
 *.plg
 

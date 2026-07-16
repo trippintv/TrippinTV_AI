@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 
 // Admin / server-side client — requires service_role key
 const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {
   if (process.env.NODE_ENV === 'development') {

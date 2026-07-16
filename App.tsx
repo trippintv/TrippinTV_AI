@@ -10,8 +10,12 @@ import ChatView from './components/ChatView';
 import SafetyDashboard from './components/SafetyDashboard';
 import DisclaimerOverlay from './components/DisclaimerOverlay';
 import { User, Video, ViewType, Comment, Message } from './types';
-import { GoogleOAuthProvider } from '@react-oauth/google';
-import { io, Socket } from 'socket.io-client';
+import { supabase } from './src/lib/supabaseClient';
+
+const getToken = async (): Promise<string | null> => {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
+};
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -22,31 +26,34 @@ const App: React.FC = () => {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [unreadChat, setUnreadChat] = useState(false);
-  
-  const socketRef = useRef<Socket | null>(null);
 
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
-
-  // Socket setup
+  // Supabase Realtime setup
   useEffect(() => {
-    if (user) {
-      const socket = io(window.location.origin.replace('3000', '3001'));
-      socketRef.current = socket;
+    if (!user) return;
 
-      socket.on('connect', () => {
-        socket.emit('join', user.id);
-      });
-
-      socket.on('message', (msg: Message) => {
-        if (currentView !== 'chat' && msg.senderId !== user.id) {
-          setUnreadChat(true);
+    const channel = supabase
+      .channel('app-updates')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Message' }, (payload) => {
+        const msg = payload.new as Message;
+        if (msg.senderId !== user.id) {
+          if (currentView !== 'chat') {
+            setUnreadChat(true);
+          }
         }
-      });
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Video' }, (payload) => {
+        const updatedVideo = payload.new as Video;
+        setVideos(prev => prev.map(v => v.id === updatedVideo.id ? updatedVideo : v));
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Video' }, (payload) => {
+        const newVideo = payload.new as Video;
+        setVideos(prev => [newVideo, ...prev]);
+      })
+      .subscribe();
 
-      return () => {
-        socket.disconnect();
-      };
-    }
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user, currentView]);
 
   useEffect(() => {
@@ -84,41 +91,71 @@ const App: React.FC = () => {
     fetchData();
   }, []);
 
-  const handleAuth = async (username: string) => {
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username })
-      });
-      const data = await res.json();
-      setUser(data);
-      localStorage.setItem('trippin_user', JSON.stringify(data));
+  const handleAuthSuccess = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await syncUserFromBackend(session.user.id);
       setIsAuthModalOpen(false);
-      // Refresh user list
-      const usersRes = await fetch('/api/users');
-      setAllUsers(await usersRes.json());
-    } catch (err) {
-      alert("Auth failed");
     }
   };
 
-  const handleGoogleAuth = (userData: User) => {
-    setUser(userData);
-    localStorage.setItem('trippin_user', JSON.stringify(userData));
-    setIsAuthModalOpen(false);
-    // Refresh user list
-    fetch('/api/users')
-      .then(res => res.json())
-      .then(users => setAllUsers(users));
+  const syncUserFromBackend = async (userId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch(`/api/users?id=${userId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to sync user');
+      }
+
+      const users = await res.json();
+      const foundUser = Array.isArray(users) ? users[0] : users;
+      if (foundUser) {
+        setUser(foundUser);
+        localStorage.setItem('trippin_user', JSON.stringify(foundUser));
+      }
+    } catch (err) {
+      console.error("User sync failed", err);
+    }
+  };
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session) {
+        await syncUserFromBackend(session.user.id);
+      } else {
+        setUser(null);
+        localStorage.removeItem('trippin_user');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    localStorage.removeItem('trippin_user');
+    setCurrentView('feed');
   };
 
   const handleUpdateUser = async (updates: Partial<User>) => {
     if (!user) return;
     try {
+      const token = await getToken();
       const res = await fetch(`/api/users/${user.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(updates)
       });
       if (!res.ok) {
@@ -132,12 +169,6 @@ const App: React.FC = () => {
     } catch (err: any) {
       alert(err.message);
     }
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('trippin_user');
-    setCurrentView('feed');
   };
 
   const handleAgreeDisclaimer = () => {
@@ -157,10 +188,14 @@ const App: React.FC = () => {
     const increment = isVoting ? 1 : -1;
 
     try {
+      const token = await getToken();
       const res = await fetch(`/api/videos/${videoId}/vote`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, increment })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ increment })
       });
       const updatedVideo = await res.json();
       
@@ -179,26 +214,21 @@ const App: React.FC = () => {
 
   const handleAddVideo = async (newVideo: Omit<Video, 'id' | 'createdAt' | 'trips' | 'comments'>, file?: File) => {
     try {
-      let res;
-      if (file) {
-        const formData = new FormData();
-        formData.append('video', file);
-        formData.append('userId', newVideo.userId);
-        formData.append('username', newVideo.username);
-        formData.append('title', newVideo.title);
-        formData.append('description', newVideo.description);
-        
-        res = await fetch('/api/videos', {
-          method: 'POST',
-          body: formData
-        });
-      } else {
-        res = await fetch('/api/videos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newVideo)
-        });
+      if (!file) {
+        throw new Error("A video file is required");
       }
+      const token = await getToken();
+      const formData = new FormData();
+      formData.append('video', file);
+      formData.append('username', newVideo.username);
+      formData.append('title', newVideo.title);
+      formData.append('description', newVideo.description);
+
+      const res = await fetch('/api/videos', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+      });
 
       if (!res.ok) {
         const err = await res.json();
@@ -217,13 +247,16 @@ const App: React.FC = () => {
   const handleComment = async (videoId: string, commentData: Partial<Comment>) => {
     if (!user) { setIsAuthModalOpen(true); return; }
     try {
+      const token = await getToken();
       const res = await fetch('/api/comments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           ...commentData,
           videoId,
-          userId: user.id,
           username: user.username,
           avatar: user.avatar
         })
@@ -251,8 +284,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <GoogleOAuthProvider clientId={googleClientId}>
-      <div className="min-h-screen bg-black text-white flex flex-col">
+    <div className="min-h-screen bg-black text-white flex flex-col">
         <Navbar 
           user={user} 
           onAuthClick={() => setIsAuthModalOpen(true)}
@@ -293,9 +325,9 @@ const App: React.FC = () => {
         {isAuthModalOpen && (
           <AuthModal 
             onClose={() => setIsAuthModalOpen(false)} 
-            onLogin={handleAuth} 
-            onGoogleLogin={handleGoogleAuth}
+            onAuthSuccess={handleAuthSuccess} 
           />
+
         )}
 
         {/* Upload Modal */}
@@ -350,8 +382,7 @@ const App: React.FC = () => {
             </button>
           )}
         </div>
-      </div>
-    </GoogleOAuthProvider>
+    </div>
   );
 };
 

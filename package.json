@@ -6,7 +6,7 @@
   "main": "index.tsx",
   "scripts": {
     "dev": "vite",
-    "server": "nodemon --watch server --exec ts-node server/index.ts",
+    "server": "nodemon --watch server --exec \"node --loader ts-node/esm\" server/index.ts",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -16,21 +16,17 @@
     "@node-ai/cli": "^0.1.28",
     "@prisma/adapter-pg": "^7.6.0",
     "@prisma/client": "^7.6.0",
-    "@react-oauth/google": "^0.13.4",
     "@supabase/supabase-js": "^2.110.2",
     "@types/pg": "^8.20.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.0",
     "express": "^5.2.1",
-    "google-auth-library": "^10.6.2",
     "helmet": "^8.1.0",
     "lucide-react": "^0.446.0",
     "multer": "^2.1.1",
     "pg": "^8.20.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

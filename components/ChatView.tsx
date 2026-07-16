@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Message } from '../types';
 import ReportModal from './ReportModal';
-import { io, Socket } from 'socket.io-client';
+import { supabase } from '../src/lib/supabaseClient';
 
 interface ChatViewProps {
   currentUser: User;
@@ -21,9 +21,13 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
   const [isSending, setIsSending] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'recent' | 'explore'>('recent');
-  
-  const socketRef = useRef<Socket | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const getToken = async (): Promise<string | null> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ?? null;
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -33,37 +37,40 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
     scrollToBottom();
   }, [messages]);
 
-  // Socket setup
+  // Supabase Realtime setup
   useEffect(() => {
-    const socket = io(window.location.origin.replace('3000', '3001')); // Assuming 3001 for server
-    socketRef.current = socket;
+    const channel = supabase
+      .channel(`chat-${currentUser.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Message' }, (payload) => {
+        const msg = payload.new as Message;
+        // Only relevant if the message involves the current user
+        if (msg.senderId !== currentUser.id && msg.receiverId !== currentUser.id) return;
 
-    socket.on('connect', () => {
-      socket.emit('join', currentUser.id);
-    });
-
-    socket.on('message', (msg: Message) => {
-      // If we're currently chatting with the sender (or we are the sender), add to messages
-      if (
-        (selectedUser && (msg.senderId === selectedUser.id || (msg.senderId === currentUser.id && msg.receiverId === selectedUser.id)))
-      ) {
-        setMessages(prev => {
-          if (prev.find(m => m.id === msg.id)) return prev;
-          return [...prev, msg];
-        });
-      }
-      // Refresh conversations list to update "last message"
-      fetchConversations();
-    });
+        if (
+          selectedUser &&
+          (msg.senderId === selectedUser.id || (msg.senderId === currentUser.id && msg.receiverId === selectedUser.id))
+        ) {
+          setMessages(prev => {
+            if (prev.find(m => m.id === msg.id)) return prev;
+            return [...prev, msg];
+          });
+        }
+        // Refresh conversations list to update "last message"
+        fetchConversations();
+      })
+      .subscribe();
 
     return () => {
-      socket.disconnect();
+      supabase.removeChannel(channel);
     };
   }, [selectedUser, currentUser.id]);
 
   const fetchConversations = async () => {
     try {
-      const res = await fetch(`/api/conversations/${currentUser.id}`);
+      const token = await getToken();
+      const res = await fetch(`/api/conversations/${currentUser.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const data = await res.json();
       setConversations(data);
     } catch (err) {
@@ -78,7 +85,10 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
   useEffect(() => {
     if (selectedUser) {
       const fetchMessages = async () => {
-        const res = await fetch(`/api/messages/${currentUser.id}/${selectedUser.id}`);
+        const token = await getToken();
+        const res = await fetch(`/api/messages/${currentUser.id}/${selectedUser.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         setMessages(await res.json());
       };
       fetchMessages();
@@ -90,11 +100,14 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
 
     setIsSending(true);
     try {
+      const token = await getToken();
       const res = await fetch('/api/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
-          senderId: currentUser.id,
           receiverId: selectedUser.id,
           text: newMessage
         })

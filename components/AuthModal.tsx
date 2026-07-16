@@ -1,40 +1,57 @@
 
 import React, { useState } from 'react';
-import { GoogleLogin } from '@react-oauth/google';
 import { User } from '../types';
+import { supabase } from '../src/lib/supabaseClient';
 
 interface AuthModalProps {
   onClose: () => void;
-  onLogin: (username: string) => void;
-  onGoogleLogin: (userData: User) => void;
+  onAuthSuccess: () => void;
 }
 
-const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin, onGoogleLogin }) => {
+const AuthModal: React.FC<AuthModalProps> = ({ onClose, onAuthSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (username.trim()) {
-      onLogin(username);
+    setIsProcessing(true);
+    try {
+      if (isLogin) {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        if (error) throw error;
+        alert('Confirmation email sent! Please check your inbox.');
+      }
+      onAuthSuccess();
+    } catch (err: any) {
+      alert(err.message || 'Authentication failed');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
-  const handleGoogleSuccess = async (credentialResponse: any) => {
+  const handleGoogleLogin = async () => {
     setIsProcessing(true);
     try {
-      const res = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: credentialResponse.credential })
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+        },
       });
-      if (!res.ok) throw new Error("Google auth failed");
-      const userData = await res.json();
-      onGoogleLogin(userData);
-    } catch (err) {
-      alert("Google Login Failed. Please try again.");
+      if (error) throw error;
+    } catch (err: any) {
+      alert(err.message || 'Google Login Failed');
     } finally {
       setIsProcessing(false);
     }
@@ -63,13 +80,14 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin, onGoogleLogin }
 
         {/* Google Login Button */}
         <div className="flex justify-center mb-6">
-          <GoogleLogin
-            onSuccess={handleGoogleSuccess}
-            onError={() => alert('Login Failed')}
-            theme="filled_black"
-            shape="pill"
-            text={isLogin ? 'signin_with' : 'signup_with'}
-          />
+          <button 
+            onClick={handleGoogleLogin}
+            disabled={isProcessing}
+            className="flex items-center gap-3 bg-white text-black font-bold py-3 px-6 rounded-full hover:bg-zinc-200 transition-colors disabled:opacity-50"
+          >
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+            {isLogin ? 'Sign in with Google' : 'Sign up with Google'}
+          </button>
         </div>
 
         <div className="relative flex items-center justify-center mb-6">
@@ -79,14 +97,14 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin, onGoogleLogin }
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2 px-1">Username</label>
+            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2 px-1">Email</label>
             <input 
-              type="text" 
+              type="email" 
               required
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-zinc-800 border border-zinc-700 rounded-2xl py-3 px-4 focus:outline-none focus:border-purple-500 transition-colors"
-              placeholder="CoolTripper99"
+              placeholder="tripper@example.com"
             />
           </div>
 

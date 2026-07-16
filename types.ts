@@ -4,7 +4,7 @@ export interface User {
   username: string;
   avatar: string;
   bio?: string;
-  isLoggedIn: boolean;
+  isAdmin: boolean;
   hasAgreedToDisclaimer: boolean;
   points: number;
 }

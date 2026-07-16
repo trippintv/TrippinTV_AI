@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { OAuth2Client } from 'google-auth-library';
+import { supabaseAdmin } from '../src/lib/supabaseAdmin';
 
 dotenv.config();
 
@@ -17,97 +17,107 @@ const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 const PORT = process.env.PORT || 3001;
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // --- 1. MIDDLEWARE ---
 app.use(cors());
 app.use(express.json());
 
+// Middleware to verify Supabase Auth JWT
+const authenticateUser = async (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'No authorization header' });
+
+  const token = authHeader.split(' ')[1];
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+
+  if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+
+  req.user = user;
+  next();
+};
+
+// Middleware to verify Admin status
+const adminUser = async (req: any, res: any, next: any) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user || !user.isAdmin) return res.status(403).json({ error: 'Admin access required' });
+    next();
+  } catch (error) {
+    res.status(500).json({ error: 'Error verifying admin status' });
+  }
+};
+
 // Initialize Gemini
 const genAI = new GoogleGenAI({ apiKey: process.env.VITE_GEMINI_API_KEY || '' });
 
-// --- 2. MULTER CONFIG ---
-const storage = multer.diskStorage({
-  destination: (req: any, file: any, cb: any) => {
-    cb(null, 'uploads/'); 
-  },
-  filename: (req: any, file: any, cb: any) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
-});
-
+// --- 2. MULTER CONFIG (Memory Storage for Supabase Upload) ---
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
-
-// Serve static files
-app.use('/uploads', express.static(path.resolve('uploads')));
 
 // --- 3. ROUTES ---
 
-// 1. Auth
-app.post('/api/auth/login', async (req: any, res: any) => {
-  const { username } = req.body;
+// --- 3. ROUTES ---
+
+// User Profile Sync/Fetch
+app.get('/api/users', async (req: any, res: any) => {
+  const { id } = req.query;
   try {
-    let user = await prisma.user.findUnique({ where: { username } });
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          username,
-          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
-          points: 150,
-          isLoggedIn: true
+    if (id) {
+      // For specific user fetch, we need to check if they are authenticated to allow "get-or-create"
+      const authHeader = req.headers.authorization;
+      if (!authHeader) return res.status(401).json({ error: 'Authentication required to sync profile' });
+
+      const token = authHeader.split(' ')[1];
+      const { data: { user: supabaseUser }, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+      if (authError || !supabaseUser || supabaseUser.id !== id) {
+        return res.status(401).json({ error: 'Invalid token or ID mismatch' });
+      }
+
+      let user = await prisma.user.findUnique({ where: { id: supabaseUser.id } });
+
+      if (!user) {
+        // Create default profile for new Supabase user
+        const email = supabaseUser.email || 'unknown';
+        const baseUsername = email.split('@')[0] || 'tripper';
+        
+        // Ensure username uniqueness
+        let username = baseUsername;
+        let attempts = 0;
+        while (attempts < 10) {
+          const existing = await prisma.user.findUnique({ where: { username } });
+          if (!existing) break;
+          username = `${baseUsername}_${Math.floor(Math.random() * 10000)}`;
+          attempts++;
         }
-      });
+
+        user = await prisma.user.create({
+          data: {
+            id: supabaseUser.id,
+            username: username,
+            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${supabaseUser.id}`,
+            points: 0,
+            hasAgreedToDisclaimer: false,
+          }
+        });
+      }
+      res.json(user);
     } else {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { isLoggedIn: true }
-      });
+      const users = await prisma.user.findMany();
+      res.json(users);
     }
-    res.json(user);
   } catch (error) {
-    console.error("Auth Error:", error);
-    res.status(500).json({ error: "Auth failed" });
+    console.error(error);
+    res.status(500).json({ error: "Fetch failed" });
   }
 });
 
-app.post('/api/auth/google', async (req: any, res: any) => {
-  const { token } = req.body;
-  try {
-    const ticket = await googleClient.verifyIdToken({
-      idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    if (!payload) throw new Error("Invalid token");
-
-    const { sub, email, name, picture } = payload;
-    const username = name?.replace(/\s+/g, '_').toLowerCase() || `user_${sub.substring(0, 5)}`;
-
-    let user = await prisma.user.findUnique({ where: { username } });
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          username,
-          avatar: picture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
-          points: 150,
-          isLoggedIn: true
-        }
-      });
-    } else {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { isLoggedIn: true }
-      });
-    }
-    res.json(user);
-  } catch (error) {
-    console.error("Google Auth Error:", error);
-    res.status(401).json({ error: "Google authentication failed" });
-  }
-});
-
-app.patch('/api/users/:id', async (req: any, res: any) => {
+app.patch('/api/users/:id', authenticateUser, async (req: any, res: any) => {
   const { id } = req.params;
+  if (req.user.id !== id) return res.status(403).json({ error: 'Forbidden' });
+  
   const updates = req.body;
   try {
     const user = await prisma.user.update({
@@ -118,11 +128,6 @@ app.patch('/api/users/:id', async (req: any, res: any) => {
   } catch (error) {
     res.status(500).json({ error: "Update failed" });
   }
-});
-
-app.get('/api/users', async (req: any, res: any) => {
-  const users = await prisma.user.findMany();
-  res.json(users);
 });
 
 // Get Videos
@@ -139,8 +144,9 @@ app.get('/api/videos', async (req: any, res: any) => {
 });
 
 // Comments
-app.post('/api/comments', async (req: any, res: any) => {
-  const { userId, videoId, username, avatar, text } = req.body;
+app.post('/api/comments', authenticateUser, async (req: any, res: any) => {
+  const { videoId, username, avatar, text } = req.body;
+  const userId = req.user.id;
   try {
     const comment = await prisma.comment.create({
       data: { userId, videoId, username, avatar, text }
@@ -156,8 +162,11 @@ app.post('/api/comments', async (req: any, res: any) => {
 });
 
 // Messages
-app.get('/api/messages/:u1/:u2', async (req: any, res: any) => {
+app.get('/api/messages/:u1/:u2', authenticateUser, async (req: any, res: any) => {
   const { u1, u2 } = req.params;
+  if (req.user.id !== u1 && req.user.id !== u2) {
+    return res.status(403).json({ error: "Unauthorized to view this chat" });
+  }
   try {
     const messages = await prisma.message.findMany({
       where: {
@@ -174,8 +183,9 @@ app.get('/api/messages/:u1/:u2', async (req: any, res: any) => {
   }
 });
 
-app.post('/api/messages', async (req: any, res: any) => {
-  const { senderId, receiverId, text } = req.body;
+app.post('/api/messages', authenticateUser, async (req: any, res: any) => {
+  const { receiverId, text } = req.body;
+  const senderId = req.user.id;
   try {
     const message = await prisma.message.create({
       data: { senderId, receiverId, text }
@@ -186,10 +196,39 @@ app.post('/api/messages', async (req: any, res: any) => {
   }
 });
 
-// Upload Video
-app.post('/api/videos', upload.single('video'), async (req: any, res: any) => {
+// Conversations: list chat partners with the most recent message
+app.get('/api/conversations/:id', authenticateUser, async (req: any, res: any) => {
+  const { id } = req.params;
+  if (req.user.id !== id) {
+    return res.status(403).json({ error: "Unauthorized to view these conversations" });
+  }
   try {
-    const { userId, username, title, description } = req.body;
+    const messages = await prisma.message.findMany({
+      where: { OR: [{ senderId: id }, { receiverId: id }] },
+      orderBy: { createdAt: 'desc' },
+      include: { sender: true, receiver: true }
+    });
+
+    const seen = new Set<string>();
+    const conversations = [];
+    for (const msg of messages) {
+      const partner = msg.senderId === id ? msg.receiver : msg.sender;
+      if (seen.has(partner.id)) continue;
+      seen.add(partner.id);
+      const { sender, receiver, ...lastMessage } = msg as any;
+      conversations.push({ user: partner, lastMessage });
+    }
+    res.json(conversations);
+  } catch (error) {
+    res.status(500).json({ error: "Conversation fetch failed" });
+  }
+});
+
+// Upload Video
+app.post('/api/videos', authenticateUser, upload.single('video'), async (req: any, res: any) => {
+  try {
+    const { username, title, description } = req.body;
+    const userId = req.user.id;
     
     if (!req.file) {
       return res.status(400).json({ error: 'No file' });
@@ -208,29 +247,43 @@ app.post('/api/videos', upload.single('video'), async (req: any, res: any) => {
       console.log("AI skipped", e);
     }
 
-    const videoUrl = `/uploads/${req.file.filename}`;
+    // Upload to Supabase Storage
+    const fileName = `${userId}/${Date.now()}-${req.file.originalname}`;
+    const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+      .from('videos')
+      .upload(fileName, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: true
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from('videos')
+      .getPublicUrl(fileName);
 
     const video = await prisma.video.create({
       data: {
         userId,
-        username,
+        username: username || 'Anonymous',
         title: title || "New Trip",
         description: aiDescription,
-        videoUrl: videoUrl,
+        videoUrl: publicUrl,
         thumbnailUrl: '/uploads/default-thumb.jpg', 
       }
     });
 
     res.json(video);
-  } catch (error) {
+  } catch (error: any) {
     console.error(error);
-    res.status(500).json({ error: 'Server Error' });
+    res.status(500).json({ error: error.message || 'Server Error' });
   }
 });
 
-app.post('/api/videos/:id/vote', async (req: any, res: any) => {
+app.post('/api/videos/:id/vote', authenticateUser, async (req: any, res: any) => {
   const { id } = req.params;
-  const { userId, increment } = req.body;
+  const { increment } = req.body;
+  const userId = req.user.id;
   try {
     const video = await prisma.video.update({
       where: { id },
@@ -258,7 +311,7 @@ app.get('/api/safety/stats', async (req: any, res: any) => {
   }
 });
 
-app.post('/api/safety', async (req: any, res: any) => {
+app.post('/api/safety', authenticateUser, async (req: any, res: any) => {
   try {
     const report = await prisma.safetyReport.create({ data: req.body });
     res.json(report);
@@ -268,7 +321,7 @@ app.post('/api/safety', async (req: any, res: any) => {
   }
 });
 
-app.get('/api/safety', async (req: any, res: any) => {
+app.get('/api/safety', authenticateUser, adminUser, async (req: any, res: any) => {
   try {
     const reports = await prisma.safetyReport.findMany({ orderBy: { timestamp: 'desc' } });
     res.json(reports);
@@ -277,7 +330,7 @@ app.get('/api/safety', async (req: any, res: any) => {
   }
 });
 
-app.delete('/api/safety', async (req: any, res: any) => {
+app.delete('/api/safety', authenticateUser, adminUser, async (req: any, res: any) => {
   try {
     await prisma.safetyReport.deleteMany();
     res.json({ success: true });
