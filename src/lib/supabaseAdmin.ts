@@ -1,4 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 // Admin / server-side client — requires service_role key
 const supabaseUrl = process.env.SUPABASE_URL || '';

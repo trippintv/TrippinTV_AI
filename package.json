@@ -6,7 +6,7 @@
   "main": "index.tsx",
   "scripts": {
     "dev": "vite",
-    "server": "nodemon --watch server --exec \"node --loader ts-node/esm\" server/index.ts",
+    "server": "nodemon --watch server --exec tsx server/index.ts",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -42,6 +42,7 @@
     "prisma": "^7.6.0",
     "tailwindcss": "^3.4.13",
     "ts-node": "^10.9.2",
+    "tsx": "^4.23.1",
     "typescript": "^6.0.2",
     "vite": "^6.0.0"
   }

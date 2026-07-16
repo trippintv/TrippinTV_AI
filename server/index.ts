@@ -7,7 +7,17 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { supabaseAdmin } from '../src/lib/supabaseAdmin';
+import { supabaseAdmin } from '../src/lib/supabaseAdmin.ts';
+
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT:', err);
+  if (err && (err as any).stack) console.error((err as any).stack);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('UNHANDLED_REJECTION:', err);
+  if (err && (err as any).stack) console.error((err as any).stack);
+});
 
 dotenv.config();
 
