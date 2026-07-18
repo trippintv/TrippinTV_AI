@@ -81,9 +81,9 @@ jobs:
           EOF
 
       - name: Build Release AAB
+        if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
         working-directory: android
         run: ./gradlew bundleRelease --no-daemon
-        continue-on-error: true  # only succeeds when release signing is configured
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -93,9 +93,9 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Release AAB
-        if: always()
+        if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: app-release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
-          if-no-files-found: warn
+          if-no-files-found: error

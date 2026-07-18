@@ -5,9 +5,9 @@ reusing 100% of the existing React/Vite code. The native project lives in
 `android/`.
 
 ## Prerequisites (one-time, on your machine)
-- **JDK 17** (`sudo apt install openjdk-17-jdk` / brew / etc.)
+- **JDK 21** (AGP 8.13 requires it; `sudo apt install openjdk-21-jdk` / brew / etc.)
 - **Android Studio** or just the **Android SDK command-line tools**
-  - `sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.0.12077973"`
+  - `sdkmanager "platforms;android-36" "build-tools;36.0.0"`
   - Set `ANDROID_HOME` (or `ANDROID_SDK_ROOT`) to the SDK path.
 - Accept licenses: `sdkmanager --licenses`
 
@@ -22,12 +22,36 @@ cd android && ./gradlew assembleDebug
 Or in one shot: `npm run android:build`
 
 ## Build a release (Play Store) AAB
+
+### 1. Generate your upload keystore (locally — never commit it)
 ```bash
+keytool -genkey -v -keystore trippintv-release.keystore \
+  -alias trippintv -keyalg RSA -keysize 2048 -validity 10000
+```
+Save the store password + key password somewhere safe (password manager).
+This keystore is your app's signing identity — keep it private and back it up.
+
+### 2. Wire it locally (optional; for local builds)
+```bash
+cp android/keystore.properties.example android/keystore.properties
+# edit android/keystore.properties with your values, then:
 npm run android:build:release
 # AAB at: android/app/build/outputs/bundle/release/app-release.aab
 ```
-Generate an upload key and reference it in `android/app/build.gradle`
-(release signing config) before publishing.
+
+### 3. Build a signed AAB in CI (GitHub Actions)
+Add these **repo secrets** (Settings → Secrets → Actions):
+- `RELEASE_KEYSTORE_BASE64` — `base64 -w0 trippintv-release.keystore`
+- `RELEASE_KEYSTORE_PASSWORD` — your store password
+- `RELEASE_KEY_ALIAS` — `trippintv`
+- `RELEASE_KEY_PASSWORD` — your key password
+
+Push to `main` (or dispatch the workflow). CI builds **both** the debug APK and
+a **signed** `app-release.aab` and uploads them as artifacts. The AAB step is
+skipped (and not uploaded) if the keystore secrets are absent.
+
+> Lose the keystore and you cannot update the app on the Play Store under the
+> same identity — store it securely and keep a backup.
 
 ## Connecting to the backend
 - The web app calls the API via **relative** `/api/...` paths and uses
