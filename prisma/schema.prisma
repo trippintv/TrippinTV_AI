@@ -10,7 +10,7 @@ datasource db {
 }
 
 model User {
-  id                    String         @id @default(cuid())
+  id                    String         @id @default(uuid())
   username              String         @unique
   avatar                String
   bio                   String?
@@ -21,10 +21,38 @@ model User {
   comments              Comment[]
   sentMessages          Message[]      @relation("SentMessages")
   receivedMessages      Message[]      @relation("ReceivedMessages")
+  sentFriendRequests    FriendRequest[] @relation("SentFriendRequests")
+  receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
+  friendshipsInitiated  Friendship[]   @relation("FriendshipA")
+  friendshipsAccepted   Friendship[]   @relation("FriendshipB")
   lastVoteAt            DateTime?
   voteStreak            Int            @default(0)
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @default(now()) @updatedAt
+}
+
+model FriendRequest {
+  id         String   @id @default(cuid())
+  senderId   String
+  receiverId String
+  status     String   @default("pending") // 'pending' | 'accepted' | 'rejected'
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+  sender     User     @relation("SentFriendRequests", fields: [senderId], references: [id])
+  receiver   User     @relation("ReceivedFriendRequests", fields: [receiverId], references: [id])
+
+  @@unique([senderId, receiverId])
+}
+
+model Friendship {
+  id         String   @id @default(cuid())
+  userAId    String
+  userBId    String
+  createdAt  DateTime @default(now())
+  userA      User     @relation("FriendshipA", fields: [userAId], references: [id])
+  userB      User     @relation("FriendshipB", fields: [userBId], references: [id])
+
+  @@unique([userAId, userBId])
 }
 
 model Video {

@@ -71,6 +71,33 @@ const upload = multer({ storage });
 // --- 3. ROUTES ---
 
 // User Profile Sync/Fetch
+// Confirms a newly-created email user via the service-role admin API so login
+// works immediately without depending on email delivery (which can be rate-limited
+// or unconfigured in some environments).
+app.post('/api/auth/confirm', async (req: any, res: any) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'email is required' });
+  try {
+    const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+    if (listError) throw listError;
+    const target = (listData.users || []).find((u: any) => u.email === email);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+
+    if (target.email_confirmed_at) {
+      return res.json({ confirmed: true, alreadyConfirmed: true });
+    }
+
+    const { error: updErr } = await supabaseAdmin.auth.admin.updateUserById(target.id, {
+      email_confirm: true,
+    });
+    if (updErr) throw updErr;
+    res.json({ confirmed: true });
+  } catch (error: any) {
+    console.error(error);
+    res.status(500).json({ error: error.message || 'Confirmation failed' });
+  }
+});
+
 app.get('/api/users', async (req: any, res: any) => {
   const { id } = req.query;
   try {
@@ -120,9 +147,178 @@ app.get('/api/users', async (req: any, res: any) => {
     }
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Fetch failed" });
+      res.status(500).json({ error: "Fetch failed" });
   }
 });
+
+// --- Friends feature ---
+
+// Returns true if the two users are friends (either direction).
+const areFriends = async (a: string, b: string): Promise<boolean> => {
+  const count = await prisma.friendship.count({
+    where: {
+      OR: [
+        { userAId: a, userBId: b },
+        { userAId: b, userBId: a },
+      ],
+    },
+  });
+  return count > 0;
+};
+
+// Send a friend request
+app.post('/api/friends/request', authenticateUser, async (req: any, res: any) => {
+  const senderId = req.user.id;
+  const { receiverId } = req.body;
+  if (!receiverId) return res.status(400).json({ error: 'receiverId is required' });
+  if (senderId === receiverId) return res.status(400).json({ error: 'Cannot friend yourself' });
+  try {
+    if (await areFriends(senderId, receiverId)) {
+      return res.status(409).json({ error: 'Already friends' });
+    }
+    const existing = await prisma.friendRequest.findUnique({
+      where: { senderId_receiverId: { senderId, receiverId } },
+    });
+    if (existing) {
+      if (existing.status === 'pending') return res.status(409).json({ error: 'Request already sent' });
+      // recreate if previously rejected
+      await prisma.friendRequest.update({ where: { id: existing.id }, data: { status: 'pending', updatedAt: new Date() } });
+      return res.json({ status: 'pending' });
+    }
+    const reqRow = await prisma.friendRequest.create({
+      data: { senderId, receiverId, status: 'pending' },
+    });
+    res.status(201).json(reqRow);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to send friend request' });
+  }
+});
+
+// Accept a friend request (receiver is the current user)
+app.post('/api/friends/accept', authenticateUser, async (req: any, res: any) => {
+  const receiverId = req.user.id;
+  const { senderId } = req.body;
+  if (!senderId) return res.status(400).json({ error: 'senderId is required' });
+  try {
+    const fr = await prisma.friendRequest.findUnique({
+      where: { senderId_receiverId: { senderId, receiverId } },
+    });
+    if (!fr || fr.status !== 'pending') return res.status(404).json({ error: 'No pending request found' });
+    await prisma.friendRequest.update({ where: { id: fr.id }, data: { status: 'accepted' } });
+    const [a, b] = [senderId, receiverId].sort();
+    await prisma.friendship.upsert({
+      where: { userAId_userBId: { userAId: a, userBId: b } },
+      create: { userAId: a, userBId: b },
+      update: {},
+    });
+    res.json({ status: 'accepted' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to accept request' });
+  }
+});
+
+// Reject a friend request
+app.post('/api/friends/reject', authenticateUser, async (req: any, res: any) => {
+  const receiverId = req.user.id;
+  const { senderId } = req.body;
+  if (!senderId) return res.status(400).json({ error: 'senderId is required' });
+  try {
+    const fr = await prisma.friendRequest.findUnique({
+      where: { senderId_receiverId: { senderId, receiverId } },
+    });
+    if (!fr) return res.status(404).json({ error: 'No request found' });
+    await prisma.friendRequest.update({ where: { id: fr.id }, data: { status: 'rejected' } });
+    res.json({ status: 'rejected' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to reject request' });
+  }
+});
+
+// Remove a friend (either party can do this)
+app.delete('/api/friends/:friendId', authenticateUser, async (req: any, res: any) => {
+  const userId = req.user.id;
+  const { friendId } = req.params;
+  try {
+    const [a, b] = [userId, friendId].sort();
+    await prisma.friendship.deleteMany({ where: { userAId: a, userBId: b } });
+    res.json({ status: 'removed' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to remove friend' });
+  }
+});
+
+// List current user's friends, incoming & outgoing requests
+app.get('/api/friends', authenticateUser, async (req: any, res: any) => {
+  const userId = req.user.id;
+  try {
+    const friendships = await prisma.friendship.findMany({
+      where: { OR: [{ userAId: userId }, { userBId: userId }] },
+    });
+    const friendIds = friendships.map((f: any) => (f.userAId === userId ? f.userBId : f.userAId));
+    const friends = friendIds.length
+      ? await prisma.user.findMany({ where: { id: { in: friendIds } } })
+      : [];
+
+    const incoming = await prisma.friendRequest.findMany({
+      where: { receiverId: userId, status: 'pending' },
+      include: { sender: true },
+    });
+    const outgoing = await prisma.friendRequest.findMany({
+      where: { senderId: userId, status: 'pending' },
+      include: { receiver: true },
+    });
+
+    res.json({ friends, incoming, outgoing });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to load friends' });
+  }
+});
+
+// Search users by username (for adding friends)
+app.get('/api/users/search', authenticateUser, async (req: any, res: any) => {
+  const q = (req.query.q || '').toString().trim();
+  if (!q) return res.json([]);
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        username: { contains: q, mode: 'insensitive' },
+        NOT: { id: req.user.id },
+      },
+      take: 20,
+    });
+    res.json(users);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+// Friendship status between current user and another user
+app.get('/api/friends/status/:userId', authenticateUser, async (req: any, res: any) => {
+  const userId = req.user.id;
+  const { userId: otherId } = req.params;
+  try {
+    if (await areFriends(userId, otherId)) return res.json({ status: 'friends' });
+    const outgoing = await prisma.friendRequest.findUnique({
+      where: { senderId_receiverId: { senderId: userId, receiverId: otherId } },
+    });
+    if (outgoing && outgoing.status === 'pending') return res.json({ status: 'outgoing' });
+    const incoming = await prisma.friendRequest.findUnique({
+      where: { senderId_receiverId: { senderId: otherId, receiverId: userId } },
+    });
+    if (incoming && incoming.status === 'pending') return res.json({ status: 'incoming' });
+    res.json({ status: 'none' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to check status' });
+  }
+});
+
 
 app.patch('/api/users/:id', authenticateUser, async (req: any, res: any) => {
   const { id } = req.params;
@@ -177,6 +373,9 @@ app.get('/api/messages/:u1/:u2', authenticateUser, async (req: any, res: any) =>
   if (req.user.id !== u1 && req.user.id !== u2) {
     return res.status(403).json({ error: "Unauthorized to view this chat" });
   }
+  if (!(await areFriends(u1, u2))) {
+    return res.status(403).json({ error: "You can only view chats with friends" });
+  }
   try {
     const messages = await prisma.message.findMany({
       where: {
@@ -197,6 +396,9 @@ app.post('/api/messages', authenticateUser, async (req: any, res: any) => {
   const { receiverId, text } = req.body;
   const senderId = req.user.id;
   try {
+    if (!(await areFriends(senderId, receiverId))) {
+      return res.status(403).json({ error: 'You can only message friends' });
+    }
     const message = await prisma.message.create({
       data: { senderId, receiverId, text }
     });

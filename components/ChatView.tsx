@@ -126,7 +126,26 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
     }
   };
 
-  const chatPartners = allUsers.filter(u => u.id !== currentUser.id);
+  const [friends, setFriends] = useState<User[]>([]);
+
+  const fetchFriends = async () => {
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/friends', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setFriends(data.friends || []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    fetchFriends();
+  }, [currentUser.id]);
+
+  const chatPartners = friends;
 
   return (
     <div className="flex h-[calc(100vh-120px)] max-w-6xl mx-auto bg-zinc-900/50 rounded-[40px] border border-zinc-800/50 overflow-hidden shadow-2xl backdrop-blur-md">
@@ -144,7 +163,7 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
               onClick={() => setActiveTab('explore')}
               className={`text-[10px] font-black uppercase tracking-[0.2em] pb-1 border-b-2 transition-all ${activeTab === 'explore' ? 'border-purple-500 text-white' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
             >
-              People
+              Friends
             </button>
           </div>
         </div>
@@ -173,19 +192,26 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
               </div>
             )
           ) : (
-            chatPartners.map(user => (
-              <div 
-                key={user.id}
-                onClick={() => { setSelectedUser(user); setActiveTab('recent'); }}
-                className={`flex items-center gap-4 p-4 cursor-pointer transition-all border-b border-zinc-800/20 ${selectedUser?.id === user.id ? 'bg-zinc-800 shadow-inner' : 'hover:bg-zinc-800/30'}`}
-              >
-                <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-zinc-800" alt="" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold truncate text-sm">@{user.username}</p>
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Tap to message</p>
+            chatPartners.length > 0 ? (
+              chatPartners.map(user => (
+                <div 
+                  key={user.id}
+                  onClick={() => { setSelectedUser(user); setActiveTab('recent'); }}
+                  className={`flex items-center gap-4 p-4 cursor-pointer transition-all border-b border-zinc-800/20 ${selectedUser?.id === user.id ? 'bg-zinc-800 shadow-inner' : 'hover:bg-zinc-800/30'}`}
+                >
+                  <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-zinc-800" alt="" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold truncate text-sm">@{user.username}</p>
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Tap to message</p>
+                  </div>
                 </div>
+              ))
+            ) : (
+              <div className="p-10 text-center text-zinc-600">
+                <p className="text-xs uppercase font-black tracking-widest">No friends yet</p>
+                <p className="text-[10px] mt-2 text-zinc-700">Add friends from the Friends tab to start chatting.</p>
               </div>
-            ))
+            )
           )}
         </div>
       </div>

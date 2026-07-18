@@ -23,8 +23,10 @@ const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onVie
         <Logo className="w-10 h-10 md:w-12 md:h-12" />
       </div>
 
-      <div className="hidden lg:flex flex-1 max-w-md mx-8">
-        <div className="relative w-full group">
+      <div className="flex-1" />
+
+      <div className="hidden lg:flex items-center gap-4">
+        <div className="relative w-64 group">
           <input 
             type="text" 
             placeholder="Search wild trips..." 
@@ -51,6 +53,15 @@ const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onVie
             {unreadChat && (
               <div className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-black animate-pulse"></div>
             )}
+          </button>
+        )}
+
+        {user && (
+          <button 
+            onClick={() => onViewChange('friends')}
+            className={`hidden md:block px-4 py-2 rounded-full text-sm font-bold tracking-tight transition-all hover:scale-105 ${currentView === 'friends' ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)]' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+          >
+            Friends
           </button>
         )}
 

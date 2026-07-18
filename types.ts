@@ -46,4 +46,19 @@ export interface Chat {
   messages: Message[];
 }
 
-export type ViewType = 'feed' | 'leaderboard' | 'profile' | 'upload' | 'chat';
+export interface FriendRequest {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  status: string;
+  sender?: User;
+  receiver?: User;
+}
+
+export interface FriendsData {
+  friends: User[];
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+}
+
+export type ViewType = 'feed' | 'leaderboard' | 'profile' | 'upload' | 'chat' | 'friends';

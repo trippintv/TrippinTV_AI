@@ -7,6 +7,7 @@ import UploadModal from './components/UploadModal';
 import AuthModal from './components/AuthModal';
 import ProfileView from './components/ProfileView';
 import ChatView from './components/ChatView';
+import FriendsView from './components/FriendsView';
 import SafetyDashboard from './components/SafetyDashboard';
 import DisclaimerOverlay from './components/DisclaimerOverlay';
 import { User, Video, ViewType, Comment, Message } from './types';
@@ -318,6 +319,9 @@ const App: React.FC = () => {
               allUsers={allUsers}
             />
           )}
+          {currentView === 'friends' && user && (
+            <FriendsView currentUser={user} />
+          )}
           {currentView === 'safety' && <SafetyDashboard />}
         </main>
 
@@ -381,6 +385,12 @@ const App: React.FC = () => {
               )}
             </button>
           )}
+          {user && (
+            <button onClick={() => setCurrentView('friends')} className={`flex flex-col items-center ${currentView === 'friends' ? 'text-purple-500' : 'text-zinc-400'}`}>
+              <UserPlusIcon className="w-6 h-6" />
+              <span className="text-[10px] mt-1">Friends</span>
+            </button>
+          )}
         </div>
     </div>
   );
@@ -392,5 +402,6 @@ const TrophyIcon = ({className}: {className:string}) => <svg className={classNam
 const PlusIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>;
 const UserIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>;
 const ChatIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>;
+const UserPlusIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v6m3-3h-6m-7.5-3a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0zM3 19a6 6 0 0112 0" /></svg>;
 
 export default App;
