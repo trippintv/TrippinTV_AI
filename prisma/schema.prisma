@@ -25,6 +25,10 @@ model User {
   receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
   friendshipsInitiated  Friendship[]   @relation("FriendshipA")
   friendshipsAccepted   Friendship[]   @relation("FriendshipB")
+  following             Follow[]       @relation("Following")
+  followers             Follow[]       @relation("Followers")
+  notifications         Notification[] @relation("NotifRecipient")
+  reactions             Reaction[]
   lastVoteAt            DateTime?
   voteStreak            Int            @default(0)
   createdAt             DateTime       @default(now())
@@ -68,6 +72,7 @@ model Video {
   createdAt    DateTime  @default(now())
   user         User      @relation(fields: [userId], references: [id])
   comments     Comment[]
+  reactions    Reaction[]
 }
 
 model Comment {
@@ -77,9 +82,12 @@ model Comment {
   username  String
   avatar    String
   text      String
+  parentId  String?
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
   video     Video    @relation(fields: [videoId], references: [id])
+  parent    Comment? @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
 }
 
 model Message {
@@ -100,4 +108,41 @@ model SafetyReport {
   content   String
   reason    String
   reporter  String?
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("Following", fields: [followerId], references: [id])
+  following   User     @relation("Followers", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  videoId   String
+  userId    String
+  type      String   // 'fire' | 'laugh' | 'skull' | 'heart' | 'eyes'
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  video     Video    @relation(fields: [videoId], references: [id])
+
+  @@unique([videoId, userId, type])
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  recipientId String
+  actorId    String?
+  type       String   // 'friend_request' | 'friend_accepted' | 'message' | 'video_vote' | 'new_follow' | 'comment' | 'reaction'
+  entityId   String?  // videoId / userId / messageId depending on type
+  text       String
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  recipient  User     @relation("NotifRecipient", fields: [recipientId], references: [id])
+
+  @@index([recipientId, read])
 }

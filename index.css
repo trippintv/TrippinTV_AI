@@ -7,6 +7,16 @@ body {
     background-color: #000;
     color: #fff;
     overflow-x: hidden;
+    /* Respect notches / safe areas for mobile & Capacitor */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Larger touch targets on coarse pointers (phones) */
+@media (pointer: coarse) {
+    button, a, input, [role="button"] {
+        min-height: 36px;
+    }
 }
 
 .bungee {

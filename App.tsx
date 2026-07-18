@@ -8,9 +8,12 @@ import AuthModal from './components/AuthModal';
 import ProfileView from './components/ProfileView';
 import ChatView from './components/ChatView';
 import FriendsView from './components/FriendsView';
+import NotificationBell from './components/NotificationBell';
+import NotificationsView from './components/NotificationsView';
+import PublicProfileView from './components/PublicProfileView';
 import SafetyDashboard from './components/SafetyDashboard';
 import DisclaimerOverlay from './components/DisclaimerOverlay';
-import { User, Video, ViewType, Comment, Message } from './types';
+import { User, Video, ViewType, Comment, Message, ReactionType } from './types';
 import { supabase } from './src/lib/supabaseClient';
 
 const getToken = async (): Promise<string | null> => {
@@ -22,6 +25,7 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [currentView, setCurrentView] = useState<ViewType | 'safety'>('feed');
+  const [viewUserId, setViewUserId] = useState<string | undefined>(undefined);
   const [videos, setVideos] = useState<Video[]>([]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -79,9 +83,20 @@ const App: React.FC = () => {
         const savedUser = localStorage.getItem('trippin_user');
         if (savedUser) {
           const parsedUser = JSON.parse(savedUser);
-          // Refresh user data from DB
           const userInDb = users.find((u: User) => u.username === parsedUser.username);
           if (userInDb) setUser(userInDb);
+        }
+
+        // Parse deep links (/v/:id , /u/:id)
+        const path = window.location.pathname;
+        const vMatch = path.match(/^\/v\/(.+)$/);
+        const uMatch = path.match(/^\/u\/(.+)$/);
+        if (vMatch) {
+          const vid = videos.find((v: Video) => v.id === vMatch[1]);
+          if (vid) { setCurrentView('feed'); /* scroll handled below */ }
+        } else if (uMatch) {
+          setViewUserId(uMatch[1]);
+          setCurrentView('user');
         }
       } catch (err) {
         console.error("Fetch failed", err);
@@ -90,6 +105,23 @@ const App: React.FC = () => {
       }
     };
     fetchData();
+  }, []);
+
+  // Handle browser back/forward for deep links
+  useEffect(() => {
+    const onPop = () => {
+      const path = window.location.pathname;
+      const uMatch = path.match(/^\/u\/(.+)$/);
+      if (uMatch) {
+        setViewUserId(uMatch[1]);
+        setCurrentView('user');
+      } else if (!path.match(/^\/v\//)) {
+        setCurrentView('feed');
+        setViewUserId(undefined);
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
   }, []);
 
   const handleAuthSuccess = async () => {
@@ -245,7 +277,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleComment = async (videoId: string, commentData: Partial<Comment>) => {
+  const handleComment = async (videoId: string, commentData: Partial<Comment>, parentId?: string) => {
     if (!user) { setIsAuthModalOpen(true); return; }
     try {
       const token = await getToken();
@@ -258,6 +290,7 @@ const App: React.FC = () => {
         body: JSON.stringify({
           ...commentData,
           videoId,
+          parentId,
           username: user.username,
           avatar: user.avatar
         })
@@ -267,12 +300,62 @@ const App: React.FC = () => {
         throw new Error(err.error || "Comment failed");
       }
       const newComment = await res.json();
-      setVideos(prev => prev.map(v => 
+      setVideos(prev => prev.map(v =>
         v.id === videoId ? { ...v, comments: [...(v.comments || []), newComment] } : v
       ));
       setUser(prev => prev ? { ...prev, points: prev.points + 5 } : null);
     } catch (err: any) {
       alert(err.message);
+    }
+  };
+
+  const handleReact = async (videoId: string, type: ReactionType) => {
+    if (!user) { setIsAuthModalOpen(true); return; }
+    try {
+      const token = await getToken();
+      const res = await fetch(`/api/videos/${videoId}/react`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ type })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setVideos(prev => prev.map(v =>
+          v.id === videoId ? { ...v, reactionSummary: data.summary, userReactions: data.userReactions } : v
+        ));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleOpenProfile = (userId: string) => {
+    setViewUserId(userId);
+    setCurrentView('user');
+    window.history.pushState({}, '', `/u/${userId}`);
+  };
+
+  const handleShare = async (video: Video) => {
+    const url = `${window.location.origin}/v/${video.id}`;
+    const shareData = {
+      title: `Trippin' TV - ${video.title}`,
+      text: `Check out this wild trip by @${video.username} on Trippin' TV!`,
+      url,
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        alert('Link copied to clipboard!');
+      } else {
+        alert(`Share this link: ${url}`);
+      }
+    } catch {
+      // user cancelled share
     }
   };
 
@@ -290,10 +373,11 @@ const App: React.FC = () => {
           user={user} 
           onAuthClick={() => setIsAuthModalOpen(true)}
           onUploadClick={() => user ? setIsUploadModalOpen(true) : setIsAuthModalOpen(true)}
-          onViewChange={(v) => setCurrentView(v as any)}
+          onViewChange={(v) => { setCurrentView(v as any); if (v !== 'user') setViewUserId(undefined); window.history.pushState({}, '', v === 'feed' ? '/' : `/${v}`); }}
           currentView={currentView as any}
           onLogout={handleLogout}
           unreadChat={unreadChat}
+          notificationBell={user ? <NotificationBell onOpen={() => { setCurrentView('notifications'); window.history.pushState({}, '', '/notifications'); }} /> : undefined}
         />
 
         <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-4 mb-20 md:mb-0">
@@ -302,6 +386,9 @@ const App: React.FC = () => {
               videos={videos} 
               onVote={handleVote} 
               onComment={handleComment}
+              onReact={handleReact}
+              onOpenProfile={handleOpenProfile}
+              onShare={handleShare}
               user={user}
             />
           )}
@@ -321,6 +408,20 @@ const App: React.FC = () => {
           )}
           {currentView === 'friends' && user && (
             <FriendsView currentUser={user} />
+          )}
+          {currentView === 'notifications' && user && (
+            <NotificationsView />
+          )}
+          {currentView === 'user' && viewUserId && (
+            <PublicProfileView 
+              userId={viewUserId}
+              currentUser={user}
+              onVote={handleVote}
+              onComment={handleComment}
+              onReact={handleReact}
+              onOpenProfile={handleOpenProfile}
+              onShare={handleShare}
+            />
           )}
           {currentView === 'safety' && <SafetyDashboard />}
         </main>
@@ -391,6 +492,12 @@ const App: React.FC = () => {
               <span className="text-[10px] mt-1">Friends</span>
             </button>
           )}
+          {user && (
+            <button onClick={() => setCurrentView('notifications')} className={`flex flex-col items-center ${currentView === 'notifications' ? 'text-purple-500' : 'text-zinc-400'}`}>
+              <BellIcon className="w-6 h-6" />
+              <span className="text-[10px] mt-1">Alerts</span>
+            </button>
+          )}
         </div>
     </div>
   );
@@ -403,5 +510,6 @@ const PlusIcon = ({className}: {className:string}) => <svg className={className}
 const UserIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>;
 const ChatIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>;
 const UserPlusIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v6m3-3h-6m-7.5-3a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0zM3 19a6 6 0 0112 0" /></svg>;
+const BellIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>;
 
 export default App;

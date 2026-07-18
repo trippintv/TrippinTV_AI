@@ -166,6 +166,21 @@ const areFriends = async (a: string, b: string): Promise<boolean> => {
   return count > 0;
 };
 
+// Inserts a notification for a recipient (fire-and-forget, never blocks the request).
+const createNotification = async (data: {
+  recipientId: string;
+  actorId?: string | null;
+  type: string;
+  entityId?: string | null;
+  text: string;
+}) => {
+  try {
+    await prisma.notification.create({ data: { read: false, ...data } });
+  } catch (err) {
+    console.error('Notification create failed', err);
+  }
+};
+
 // Send a friend request
 app.post('/api/friends/request', authenticateUser, async (req: any, res: any) => {
   const senderId = req.user.id;
@@ -211,6 +226,13 @@ app.post('/api/friends/accept', authenticateUser, async (req: any, res: any) => 
       where: { userAId_userBId: { userAId: a, userBId: b } },
       create: { userAId: a, userBId: b },
       update: {},
+    });
+    const receiver = await prisma.user.findUnique({ where: { id: receiverId } });
+    await createNotification({
+      recipientId: senderId,
+      actorId: receiverId,
+      type: 'friend_accepted',
+      text: `${receiver?.username || 'Someone'} accepted your friend request`,
     });
     res.json({ status: 'accepted' });
   } catch (error) {
@@ -349,18 +371,44 @@ app.get('/api/videos', async (req: any, res: any) => {
   }
 });
 
-// Comments
+// Comments (supports replies via parentId)
 app.post('/api/comments', authenticateUser, async (req: any, res: any) => {
-  const { videoId, username, avatar, text } = req.body;
+  const { videoId, username, avatar, text, parentId } = req.body;
   const userId = req.user.id;
   try {
     const comment = await prisma.comment.create({
-      data: { userId, videoId, username, avatar, text }
+      data: { userId, videoId, username, avatar, text, parentId: parentId || null }
     });
     await prisma.user.update({
       where: { id: userId },
       data: { points: { increment: 5 } }
     });
+
+    if (parentId) {
+      // notify parent comment author
+      const parent = await prisma.comment.findUnique({ where: { id: parentId } });
+      if (parent && parent.userId !== userId) {
+        await createNotification({
+          recipientId: parent.userId,
+          actorId: userId,
+          type: 'comment',
+          entityId: videoId,
+          text: `${username} replied to your comment`,
+        });
+      }
+    } else {
+      // notify video owner
+      const video = await prisma.video.findUnique({ where: { id: videoId } });
+      if (video && video.userId !== userId) {
+        await createNotification({
+          recipientId: video.userId,
+          actorId: userId,
+          type: 'comment',
+          entityId: videoId,
+          text: `${username} commented on your video "${video.title}"`,
+        });
+      }
+    }
     res.json(comment);
   } catch (error) {
     res.status(500).json({ error: "Comment failed" });
@@ -401,6 +449,14 @@ app.post('/api/messages', authenticateUser, async (req: any, res: any) => {
     }
     const message = await prisma.message.create({
       data: { senderId, receiverId, text }
+    });
+    const sender = await prisma.user.findUnique({ where: { id: senderId } });
+    await createNotification({
+      recipientId: receiverId,
+      actorId: senderId,
+      type: 'message',
+      entityId: message.id,
+      text: `New message from ${sender?.username || 'a friend'}`,
     });
     res.json(message);
   } catch (error) {
@@ -505,9 +561,183 @@ app.post('/api/videos/:id/vote', authenticateUser, async (req: any, res: any) =>
       where: { id: userId },
       data: { points: { increment: increment > 0 ? 10 : -10 } }
     });
+    if (increment > 0 && video.userId !== userId) {
+      const voter = await prisma.user.findUnique({ where: { id: userId } });
+      await createNotification({
+        recipientId: video.userId,
+        actorId: userId,
+        type: 'video_vote',
+        entityId: video.id,
+        text: `${voter?.username || 'Someone'} tripped your video "${video.title}"`,
+      });
+    }
     res.json(video);
   } catch (error) {
     res.status(500).json({ error: "Vote failed" });
+  }
+});
+
+// --- Reactions ---
+const REACTION_TYPES = ['fire', 'laugh', 'skull', 'heart', 'eyes'];
+
+app.post('/api/videos/:id/react', authenticateUser, async (req: any, res: any) => {
+  const { id } = req.params;
+  const { type } = req.body;
+  const userId = req.user.id;
+  if (!REACTION_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid reaction type' });
+  try {
+    const existing = await prisma.reaction.findUnique({
+      where: { videoId_userId_type: { videoId: id, userId, type } },
+    });
+    if (existing) {
+      await prisma.reaction.delete({ where: { id: existing.id } });
+    } else {
+      await prisma.reaction.create({ data: { videoId: id, userId, type } });
+    }
+    const counts = await prisma.reaction.groupBy({
+      by: ['type'],
+      where: { videoId: id },
+      _count: { _all: true },
+    });
+    const summary: Record<string, number> = {};
+    REACTION_TYPES.forEach(t => (summary[t] = 0));
+    counts.forEach((c: any) => (summary[c.type] = c._count._all));
+    res.json({ summary, userReactions: (await prisma.reaction.findMany({ where: { videoId: id, userId } })).map(r => r.type) });
+  } catch (error) {
+    res.status(500).json({ error: 'Reaction failed' });
+  }
+});
+
+app.get('/api/videos/:id/reactions', async (req: any, res: any) => {
+  const { id } = req.params;
+  try {
+    const counts = await prisma.reaction.groupBy({
+      by: ['type'],
+      where: { videoId: id },
+      _count: { _all: true },
+    });
+    const summary: Record<string, number> = {};
+    REACTION_TYPES.forEach(t => (summary[t] = 0));
+    counts.forEach((c: any) => (summary[c.type] = c._count._all));
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load reactions' });
+  }
+});
+
+// --- Follows ---
+app.post('/api/follow/:userId', authenticateUser, async (req: any, res: any) => {
+  const followerId = req.user.id;
+  const followingId = req.params.userId;
+  if (followerId === followingId) return res.status(400).json({ error: 'Cannot follow yourself' });
+  try {
+    const existing = await prisma.follow.findUnique({
+      where: { followerId_followingId: { followerId, followingId } },
+    });
+    if (existing) return res.status(409).json({ error: 'Already following' });
+    await prisma.follow.create({ data: { followerId, followingId } });
+    const followed = await prisma.user.findUnique({ where: { id: followingId } });
+    await createNotification({
+      recipientId: followingId,
+      actorId: followerId,
+      type: 'new_follow',
+      text: `started following you`,
+    });
+    res.status(201).json({ status: 'following' });
+  } catch (error) {
+    res.status(500).json({ error: 'Follow failed' });
+  }
+});
+
+app.delete('/api/follow/:userId', authenticateUser, async (req: any, res: any) => {
+  const followerId = req.user.id;
+  const followingId = req.params.userId;
+  try {
+    await prisma.follow.deleteMany({ where: { followerId, followingId } });
+    res.json({ status: 'unfollowed' });
+  } catch (error) {
+    res.status(500).json({ error: 'Unfollow failed' });
+  }
+});
+
+app.get('/api/follow/status/:userId', authenticateUser, async (req: any, res: any) => {
+  const followerId = req.user.id;
+  const followingId = req.params.userId;
+  try {
+    const f = await prisma.follow.findUnique({
+      where: { followerId_followingId: { followerId, followingId } },
+    });
+    res.json({ following: !!f });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check follow status' });
+  }
+});
+
+// --- Notifications ---
+app.get('/api/notifications', authenticateUser, async (req: any, res: any) => {
+  const userId = req.user.id;
+  try {
+    const notifications = await prisma.notification.findMany({
+      where: { recipientId: userId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    const unread = notifications.filter(n => !n.read).length;
+    res.json({ notifications, unread });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load notifications' });
+  }
+});
+
+app.post('/api/notifications/read', authenticateUser, async (req: any, res: any) => {
+  const userId = req.user.id;
+  const { id } = req.body;
+  try {
+    if (id) {
+      await prisma.notification.updateMany({ where: { id, recipientId: userId }, data: { read: true } });
+    } else {
+      await prisma.notification.updateMany({ where: { recipientId: userId }, data: { read: true } });
+    }
+    res.json({ status: 'ok' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to mark read' });
+  }
+});
+
+// --- Public profile + videos (for clicking @username) ---
+app.get('/api/users/:id/public', async (req: any, res: any) => {
+  const { id } = req.params;
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, username: true, avatar: true, bio: true, points: true, createdAt: true },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const videos = await prisma.video.findMany({ where: { userId: id }, orderBy: { createdAt: 'desc' } });
+    const followerCount = await prisma.follow.count({ where: { followingId: id } });
+    const followingCount = await prisma.follow.count({ where: { followerId: id } });
+    res.json({ user, videos, followerCount, followingCount });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load profile' });
+  }
+});
+
+// Following feed (videos from people you follow)
+app.get('/api/feed/following', authenticateUser, async (req: any, res: any) => {
+  const userId = req.user.id;
+  try {
+    const follows = await prisma.follow.findMany({ where: { followerId: userId }, select: { followingId: true } });
+    const ids = follows.map(f => f.followingId);
+    const videos = ids.length
+      ? await prisma.video.findMany({
+          where: { userId: { in: ids } },
+          include: { comments: true },
+          orderBy: { createdAt: 'desc' },
+        })
+      : [];
+    res.json(videos);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load following feed' });
   }
 });
 

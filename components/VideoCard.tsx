@@ -1,23 +1,48 @@
 
-import React, { useState, useRef } from 'react';
-import { Video, User, Comment } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import { Video, User, Comment, ReactionType, ReactionSummary } from '../types';
 import { moderateContent } from '../services/geminiService';
 import ReportModal from './ReportModal';
 
 interface VideoCardProps {
   video: Video;
   onVote: (videoId: string) => void;
-  onComment: (videoId: string, comment: Comment) => void;
+  onComment: (videoId: string, comment: Comment, parentId?: string) => void;
   user: User | null;
+  onOpenProfile: (userId: string) => void;
+  onShare: (video: Video) => void;
+  onReact: (videoId: string, type: ReactionType) => void;
+  reactionSummary?: ReactionSummary;
+  userReactions?: ReactionType[];
 }
 
-const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user }) => {
+const REACTIONS: { type: ReactionType; emoji: string; label: string }[] = [
+  { type: 'fire', emoji: '🔥', label: 'Fire' },
+  { type: 'laugh', emoji: '😂', label: 'Laugh' },
+  { type: 'skull', emoji: '💀', label: 'Skull' },
+  { type: 'heart', emoji: '❤️', label: 'Love' },
+  { type: 'eyes', emoji: '👀', label: 'Eyes' },
+];
+
+const VideoCard: React.FC<VideoCardProps> = ({
+  video,
+  onVote,
+  onComment,
+  user,
+  onOpenProfile,
+  onShare,
+  onReact,
+  reactionSummary,
+  userReactions = [],
+}) => {
   const [commentText, setCommentText] = useState('');
+  const [replyTo, setReplyTo] = useState<{ id: string; username: string } | null>(null);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const [showReactions, setShowReactions] = useState(false);
   const [showTapOverlay, setShowTapOverlay] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
-  
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastTap = useRef<number>(0);
 
@@ -25,10 +50,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
     const now = Date.now();
     const DOUBLE_TAP_DELAY = 300;
     if (now - lastTap.current < DOUBLE_TAP_DELAY) {
-      // Double tap detected
-      if (!video.hasVoted) {
-        onVote(video.id);
-      }
+      if (!video.hasVoted) onVote(video.id);
       setShowTapOverlay(true);
       setTimeout(() => setShowTapOverlay(false), 800);
     }
@@ -37,80 +59,64 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
 
   const toggleFullscreen = () => {
     if (!videoRef.current) return;
-
     const v = videoRef.current as any;
-    if (v.requestFullscreen) {
-      v.requestFullscreen();
-    } else if (v.webkitRequestFullscreen) {
-      v.webkitRequestFullscreen();
-    } else if (v.msRequestFullscreen) {
-      v.msRequestFullscreen();
-    } else if (v.webkitEnterFullscreen) {
-      // Specifically for iOS Safari
-      v.webkitEnterFullscreen();
-    }
+    if (v.requestFullscreen) v.requestFullscreen();
+    else if (v.webkitRequestFullscreen) v.webkitRequestFullscreen();
+    else if (v.msRequestFullscreen) v.msRequestFullscreen();
+    else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();
   };
 
   const handlePostComment = async () => {
     if (!commentText.trim() || !user) return;
     setIsAiProcessing(true);
-    
-    // AI Safety Check
     const result = await moderateContent(commentText, 'comment');
     if (result.safe) {
       const newComment: Comment = {
         id: Math.random().toString(36).substr(2, 9),
         userId: user.id,
         username: user.username,
-        avatar: user.avatar, // Use user's current avatar
+        avatar: user.avatar,
         text: commentText,
         createdAt: new Date().toISOString(),
       };
-      onComment(video.id, newComment);
+      onComment(video.id, newComment, replyTo?.id);
       setCommentText('');
+      setReplyTo(null);
     } else {
       alert(`Safety Alert: Comment blocked. ${result.reason}`);
     }
     setIsAiProcessing(false);
   };
 
-  const handleShare = async () => {
-    const shareData = {
-      title: `Trippin' TV - ${video.title}`,
-      text: `Check out this wild trip by @${video.username} on Trippin' TV!`,
-      url: window.location.href,
-    };
-    if (navigator.share) {
-      try { await navigator.share(shareData); } catch (err) {}
-    } else {
-       alert("Link copied to clipboard!");
-    }
-  };
+  // Build flat + threaded comments
+  const topLevel = video.comments.filter(c => !c.parentId);
+  const repliesFor = (id: string) => video.comments.filter(c => c.parentId === id);
+
+  const summary: ReactionSummary = reactionSummary || { fire: 0, laugh: 0, skull: 0, heart: 0, eyes: 0 };
 
   return (
     <div className="bg-zinc-900 rounded-3xl overflow-hidden w-full max-w-[420px] shadow-2xl border border-zinc-800 group relative">
       <div className="relative aspect-[9/16] bg-black cursor-pointer" onClick={handleVideoClick}>
-        <video 
+        <video
           ref={videoRef}
-          src={video.videoUrl} 
+          src={video.videoUrl}
           className="w-full h-full object-cover"
           loop muted autoPlay playsInline
         />
-        
-        {/* Double Tap TV Overlay */}
+
         {showTapOverlay && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
             <div className="animate-ping absolute">
-               <TripIcon className="w-24 h-24 text-purple-500 opacity-50" active={true} />
+              <TripIcon className="w-24 h-24 text-purple-500 opacity-50" active={true} />
             </div>
             <TripIcon className="w-24 h-24 text-white drop-shadow-[0_0_20px_rgba(168,85,247,0.5)] scale-125 transition-transform" active={true} />
           </div>
         )}
 
         {/* Interaction Bar */}
-        <div className="absolute bottom-4 right-4 flex flex-col items-center gap-6 z-10" onClick={(e) => e.stopPropagation()}>
+        <div className="absolute bottom-4 right-4 flex flex-col items-center gap-5 z-10" onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-col items-center gap-1">
-            <button 
+            <button
               onClick={() => onVote(video.id)}
               className={`p-3 rounded-full transition-all transform active:scale-90 shadow-lg ${video.hasVoted ? 'bg-purple-600 ring-2 ring-purple-400' : 'bg-zinc-800/80 hover:bg-zinc-700'}`}
             >
@@ -122,7 +128,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
           </div>
 
           <div className="flex flex-col items-center gap-1">
-            <button 
+            <button
               onClick={() => setShowComments(!showComments)}
               className={`p-3 rounded-full transition-all ${showComments ? 'bg-zinc-700' : 'bg-zinc-800/80 hover:bg-zinc-700'}`}
             >
@@ -132,7 +138,19 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
           </div>
 
           <div className="flex flex-col items-center gap-1">
-            <button onClick={handleShare} className="p-3 rounded-full bg-zinc-800/80 hover:bg-zinc-700 transition-all">
+            <button
+              onClick={() => setShowReactions(!showReactions)}
+              className={`p-3 rounded-full transition-all ${showReactions ? 'bg-pink-600' : 'bg-zinc-800/80 hover:bg-zinc-700'}`}
+            >
+              <span className="text-xl leading-none">😂</span>
+            </button>
+            <span className="text-xs font-bold drop-shadow-md">
+              {Object.values(summary).reduce((a, b) => a + b, 0) || 'React'}
+            </span>
+          </div>
+
+          <div className="flex flex-col items-center gap-1">
+            <button onClick={() => onShare(video)} className="p-3 rounded-full bg-zinc-800/80 hover:bg-zinc-700 transition-all">
               <ShareIcon className="w-7 h-7" />
             </button>
             <span className="text-xs font-bold drop-shadow-md">Share</span>
@@ -146,7 +164,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
           </div>
 
           <div className="flex flex-col items-center gap-1 pt-2">
-            <button 
+            <button
               onClick={() => setIsReportModalOpen(true)}
               className="p-3 rounded-full bg-red-900/40 hover:bg-red-900 transition-all group"
               title="Report this video"
@@ -157,12 +175,33 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
           </div>
         </div>
 
+        {/* Reaction popover */}
+        {showReactions && (
+          <div
+            className="absolute bottom-24 right-2 z-20 bg-zinc-800/95 backdrop-blur rounded-2xl p-2 flex gap-1 shadow-2xl border border-zinc-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {REACTIONS.map(r => (
+              <button
+                key={r.type}
+                onClick={() => { onReact(video.id, r.type); setShowReactions(false); }}
+                className={`text-2xl p-2 rounded-xl transition-transform hover:scale-125 ${userReactions.includes(r.type) ? 'bg-pink-600/40 ring-1 ring-pink-400' : 'hover:bg-zinc-700'}`}
+                title={r.label}
+              >
+                {r.emoji}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Info Overlay */}
         <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/90 to-transparent pointer-events-none">
           <div className="pointer-events-auto">
             <div className="flex items-center gap-2 mb-2">
-              <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${video.username}`} className="w-8 h-8 rounded-full border border-purple-500 bg-zinc-800" alt="" />
-              <span className="font-bold text-sm">@{video.username}</span>
+              <button onClick={() => onOpenProfile(video.userId)} className="flex items-center gap-2">
+                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${video.username}`} className="w-8 h-8 rounded-full border border-purple-500 bg-zinc-800" alt="" />
+                <span className="font-bold text-sm hover:underline">@{video.username}</span>
+              </button>
             </div>
             <h3 className="text-lg font-bold mb-1">{video.title}</h3>
             <p className="text-zinc-300 text-sm line-clamp-2">{video.description}</p>
@@ -173,17 +212,43 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
       {showComments && (
         <div className="p-4 bg-zinc-900 max-h-[400px] overflow-y-auto border-t border-zinc-800 animate-in slide-in-from-bottom duration-300">
           <div className="space-y-4 mb-4">
-            {video.comments.length > 0 ? (
-              video.comments.map(c => (
-                <div key={c.id} className="flex gap-3 items-start animate-in fade-in duration-300">
-                  <img 
-                    src={c.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${c.username}`} 
-                    className="w-8 h-8 rounded-full shrink-0 border border-zinc-800 object-cover bg-zinc-800" 
-                    alt="" 
-                  />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-xs font-black text-zinc-400 block mb-0.5 uppercase tracking-tighter">@{c.username}</span>
-                    <p className="text-sm text-zinc-200 leading-tight break-words">{c.text}</p>
+            {topLevel.length > 0 ? (
+              topLevel.map(c => (
+                <div key={c.id} className="animate-in fade-in duration-300">
+                  <div className="flex gap-3 items-start">
+                    <img
+                      src={c.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${c.username}`}
+                      className="w-8 h-8 rounded-full shrink-0 border border-zinc-800 object-cover bg-zinc-800"
+                      alt=""
+                    />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-black text-zinc-400 block mb-0.5 uppercase tracking-tighter">@{c.username}</span>
+                      <p className="text-sm text-zinc-200 leading-tight break-words">{c.text}</p>
+                      {user && (
+                        <button
+                          onClick={() => setReplyTo({ id: c.id, username: c.username })}
+                          className="text-[10px] text-zinc-500 hover:text-purple-400 mt-1 font-bold uppercase tracking-widest"
+                        >
+                          Reply
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {/* Replies */}
+                  <div className="ml-11 mt-3 space-y-3 border-l border-zinc-800 pl-3">
+                    {repliesFor(c.id).map(r => (
+                      <div key={r.id} className="flex gap-2 items-start">
+                        <img
+                          src={r.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${r.username}`}
+                          className="w-6 h-6 rounded-full shrink-0 border border-zinc-800 object-cover bg-zinc-800"
+                          alt=""
+                        />
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[10px] font-black text-zinc-500 block mb-0.5 uppercase tracking-tighter">@{r.username}</span>
+                          <p className="text-xs text-zinc-300 leading-tight break-words">{r.text}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))
@@ -193,17 +258,23 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
           </div>
           {user && (
             <div className="flex gap-2 sticky bottom-0 bg-zinc-900 pt-2 border-t border-zinc-800/50">
-              <input 
-                type="text" 
+              {replyTo && (
+                <span className="text-[10px] text-purple-400 self-center font-bold">
+                  → @{replyTo.username}
+                  <button onClick={() => setReplyTo(null)} className="ml-1 text-zinc-500">✕</button>
+                </span>
+              )}
+              <input
+                type="text"
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Say something..." 
+                placeholder={replyTo ? 'Write a reply...' : 'Say something...'}
                 className="flex-1 bg-zinc-800 rounded-xl py-2 px-4 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500 transition-all"
                 onKeyPress={(e) => e.key === 'Enter' && handlePostComment()}
                 disabled={isAiProcessing}
               />
-              <button 
-                onClick={handlePostComment} 
+              <button
+                onClick={handlePostComment}
                 className="bg-purple-600 p-2.5 rounded-xl hover:bg-purple-500 transition-colors disabled:opacity-50"
                 disabled={!commentText.trim() || isAiProcessing}
               >
@@ -218,9 +289,8 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onVote, onComment, user })
         </div>
       )}
 
-      {/* Report Modal */}
       {isReportModalOpen && (
-        <ReportModal 
+        <ReportModal
           onClose={() => setIsReportModalOpen(false)}
           contentTitle={`Video: ${video.title} (by @${video.username})`}
           category="video_content"

@@ -11,9 +11,10 @@ interface NavbarProps {
   currentView: ViewType;
   onLogout: () => void;
   unreadChat?: boolean;
+  notificationBell?: React.ReactNode;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onViewChange, currentView, onLogout, unreadChat }) => {
+const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onViewChange, currentView, onLogout, unreadChat, notificationBell }) => {
   return (
     <nav className="sticky top-0 z-50 bg-black/80 backdrop-blur-md border-b border-zinc-800 px-4 md:px-8 py-3 flex justify-between items-center">
       <div 
@@ -64,6 +65,8 @@ const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onVie
             Friends
           </button>
         )}
+
+        {user && notificationBell}
 
         {user ? (
           <div className="flex items-center gap-3">

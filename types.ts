@@ -15,6 +15,7 @@ export interface Comment {
   username: string;
   avatar: string;
   text: string;
+  parentId?: string | null;
   createdAt: string;
 }
 
@@ -61,4 +62,38 @@ export interface FriendsData {
   outgoing: FriendRequest[];
 }
 
-export type ViewType = 'feed' | 'leaderboard' | 'profile' | 'upload' | 'chat' | 'friends';
+export type ReactionType = 'fire' | 'laugh' | 'skull' | 'heart' | 'eyes';
+
+export interface ReactionSummary {
+  fire: number;
+  laugh: number;
+  skull: number;
+  heart: number;
+  eyes: number;
+}
+
+export interface Notification {
+  id: string;
+  recipientId: string;
+  actorId?: string | null;
+  type: string;
+  entityId?: string | null;
+  text: string;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface PublicProfile {
+  user: User;
+  videos: Video[];
+  followerCount: number;
+  followingCount: number;
+}
+
+export type ViewType = 'feed' | 'leaderboard' | 'profile' | 'upload' | 'chat' | 'friends' | 'notifications' | 'user';
+
+export interface ViewState {
+  view: ViewType;
+  userId?: string;
+  videoId?: string;
+}
