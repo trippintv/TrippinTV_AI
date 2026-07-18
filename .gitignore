@@ -411,3 +411,11 @@ FodyWeavers.xsd
 *.sln.iml
 
 /generated/prisma
+
+# Android / Capacitor build artifacts
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/**/*.keystore
+android/**/*.jks

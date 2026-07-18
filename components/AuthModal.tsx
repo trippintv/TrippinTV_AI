@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { User } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
+import { API_BASE } from '../src/lib/api';
 
 interface AuthModalProps {
   onClose: () => void;
@@ -61,7 +62,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onAuthSuccess }) => {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin,
+          redirectTo: `${API_BASE || window.location.origin}/`,
         },
       });
       if (error) throw error;
