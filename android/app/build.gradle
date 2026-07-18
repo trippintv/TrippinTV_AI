@@ -16,7 +16,7 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    // Load signing config from keystore.properties if present, before buildTypes.
+    // Load release signing config from keystore.properties if present.
     def keystorePropsFile = rootProject.file('keystore.properties')
     def keystoreProps = new Properties()
     if (keystorePropsFile.exists()) {
@@ -29,22 +29,18 @@ android {
                 keyPassword keystoreProps['KEY_PASSWORD']
             }
         }
-    } else {
-        // No keystore present: use the default debug signing for local dev.
-        signingConfigs {
-            release {
-                signingConfig signingConfigs.debug
-            }
-        }
     }
+    // If keystore.properties is absent, do NOT define a release signingConfig:
+    // AGP automatically signs the release build with the debug key in that case.
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            // Release signing. Reads keystore.properties (gitignored).
-            // In CI the properties are generated from secrets before build.
-            signingConfig = signingConfigs.release
+            // Only attach a custom signing config when keystore.properties exists.
+            if (keystorePropsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
