@@ -1,0 +1,83 @@
+name: Android Build
+
+on:
+  push:
+    branches: [ "main", "supabase-setup" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Write .env from secrets
+        # The web build reads these at build time. Provide what's available;
+        # missing keys simply stay empty (app falls back gracefully).
+        run: |
+          cat > .env <<EOF
+          SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY=${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SECRET_KEY=${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_JWKS_URL=${{ secrets.SUPABASE_JWKS_URL }}
+          VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          DIRECT_URL=${{ secrets.DIRECT_URL }}
+          VITE_GEMINI_API_KEY=${{ secrets.VITE_GEMINI_API_KEY }}
+          VITE_API_URL=${{ secrets.VITE_API_URL }}
+          EOF
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web + sync Capacitor
+        run: |
+          npm run build
+          npx cap sync android
+
+      - name: Build Debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Build Release AAB
+        working-directory: android
+        run: ./gradlew bundleRelease --no-daemon
+        continue-on-error: true  # release signing not configured in CI by default
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload Release AAB
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: warn
