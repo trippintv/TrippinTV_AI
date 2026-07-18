@@ -419,3 +419,5 @@ android/build/
 android/local.properties
 android/**/*.keystore
 android/**/*.jks
+android/keystore.properties
+android/trippintv-release.keystore

@@ -62,10 +62,27 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
 
+      - name: Generate release keystore from secrets
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          cd android
+          echo "$KEYSTORE_B64" | base64 -d > trippintv-release.keystore
+          cat > keystore.properties <<EOF
+          STORE_FILE=trippintv-release.keystore
+          STORE_PASSWORD=$STORE_PASSWORD
+          KEY_ALIAS=$KEY_ALIAS
+          KEY_PASSWORD=$KEY_PASSWORD
+          EOF
+
       - name: Build Release AAB
         working-directory: android
         run: ./gradlew bundleRelease --no-daemon
-        continue-on-error: true  # release signing not configured in CI by default
+        continue-on-error: true  # only succeeds when release signing is configured
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
