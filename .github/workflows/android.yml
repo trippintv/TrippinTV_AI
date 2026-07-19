@@ -66,16 +66,16 @@ jobs:
 
       - name: Generate release keystore from secrets
         if: ${{ env.HAS_RELEASE_KEYSTORE == 'true' }}
+        working-directory: android
         env:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          cd android
-          echo "$KEYSTORE_B64" | base64 -d > trippintv-release.keystore
+          echo "$KEYSTORE_B64" | base64 -d > app/trippintv-release.keystore
           cat > keystore.properties <<EOF
-          STORE_FILE=trippintv-release.keystore
+          STORE_FILE=app/trippintv-release.keystore
           STORE_PASSWORD=$STORE_PASSWORD
           KEY_ALIAS=$KEY_ALIAS
           KEY_PASSWORD=$KEY_PASSWORD
