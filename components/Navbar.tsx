@@ -45,6 +45,13 @@ const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onVie
           Leaderboard
         </button>
 
+        <button
+          onClick={() => onViewChange('posts')}
+          className={`hidden md:block px-4 py-2 rounded-full text-sm font-bold tracking-tight transition-all hover:scale-105 ${currentView === 'posts' ? 'bg-purple-600 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)]' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+        >
+          Posts
+        </button>
+
         {user && (
           <button 
             onClick={() => onViewChange('chat')}

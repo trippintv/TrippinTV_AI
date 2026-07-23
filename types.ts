@@ -15,7 +15,20 @@ export interface Comment {
   username: string;
   avatar: string;
   text: string;
+  videoId?: string | null;
+  postId?: string | null;
   parentId?: string | null;
+  createdAt: string;
+}
+
+export interface Post {
+  id: string;
+  userId: string;
+  username: string;
+  title?: string | null;
+  text: string;
+  category?: string | null;
+  comments: Comment[];
   createdAt: string;
 }
 
@@ -90,7 +103,7 @@ export interface PublicProfile {
   followingCount: number;
 }
 
-export type ViewType = 'feed' | 'leaderboard' | 'profile' | 'upload' | 'chat' | 'friends' | 'notifications' | 'user';
+export type ViewType = 'feed' | 'leaderboard' | 'profile' | 'upload' | 'chat' | 'friends' | 'notifications' | 'user' | 'posts';
 
 export interface ViewState {
   view: ViewType;

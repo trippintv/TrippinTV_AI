@@ -2,6 +2,7 @@ import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
@@ -29,8 +30,11 @@ const prisma = new PrismaClient({ adapter });
 const PORT = process.env.PORT || 3001;
 
 // --- 1. MIDDLEWARE ---
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: true,
+  credentials: true,
+}));
+app.use(express.json({ limit: '10mb' }));
 
 // Middleware to verify Supabase Auth JWT
 const authenticateUser = async (req: any, res: any, next: any) => {
@@ -368,6 +372,81 @@ app.get('/api/videos', async (req: any, res: any) => {
     res.json(videos);
   } catch (error) {
     res.status(500).json({ error: "DB Error" });
+  }
+});
+
+// Get Posts (text-only, no video)
+app.get('/api/posts', async (req: any, res: any) => {
+  try {
+    const posts = await prisma.post.findMany({
+      include: { comments: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(posts);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load posts' });
+  }
+});
+
+// Create Post
+app.post('/api/posts', authenticateUser, async (req: any, res: any) => {
+  const { title, text, category, username } = req.body;
+  const userId = req.user.id;
+  if (!text || !text.trim()) return res.status(400).json({ error: 'text is required' });
+  try {
+    const post = await prisma.post.create({
+      data: {
+        userId,
+        username: username || req.user.user_metadata?.username || req.user.email?.split('@')[0] || 'Anonymous',
+        title: title || null,
+        text: text.trim(),
+        category: category || null,
+      },
+    });
+    await prisma.user.update({ where: { id: userId }, data: { points: { increment: 10 } } });
+    res.status(201).json(post);
+  } catch (error) {
+    res.status(500).json({ error: 'Post failed' });
+  }
+});
+
+// Comments on a post (supports replies via parentId)
+app.post('/api/post-comments', authenticateUser, async (req: any, res: any) => {
+  const { postId, username, avatar, text, parentId } = req.body;
+  const userId = req.user.id;
+  if (!postId || !text || !text.trim()) return res.status(400).json({ error: 'postId and text are required' });
+  try {
+    const comment = await prisma.comment.create({
+      data: { userId, postId, username, avatar, text: text.trim(), parentId: parentId || null },
+    });
+    await prisma.user.update({ where: { id: userId }, data: { points: { increment: 5 } } });
+
+    if (parentId) {
+      const parent = await prisma.comment.findUnique({ where: { id: parentId } });
+      if (parent && parent.userId !== userId) {
+        await createNotification({
+          recipientId: parent.userId,
+          actorId: userId,
+          type: 'comment',
+          entityId: postId,
+          text: `${username} replied to your comment`,
+        });
+      }
+    } else {
+      const post = await prisma.post.findUnique({ where: { id: postId } });
+      if (post && post.userId !== userId) {
+        await createNotification({
+          recipientId: post.userId,
+          actorId: userId,
+          type: 'comment',
+          entityId: postId,
+          text: `${username} commented on your post`,
+        });
+      }
+    }
+    res.json(comment);
+  } catch (error) {
+    res.status(500).json({ error: 'Comment failed' });
   }
 });
 
@@ -782,6 +861,16 @@ app.delete('/api/safety', authenticateUser, adminUser, async (req: any, res: any
 });
 
 // --- 4. START ---
+// Serve the built frontend in production (Capacitor / phone hits this server)
+const distPath = path.resolve(process.cwd(), 'dist');
+app.use(express.static(distPath));
+// SPA fallback: non-API routes serve index.html
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/api')) {
+    res.sendFile(path.join(distPath, 'index.html'));
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Trippin' TV Server live at http://localhost:${PORT}`);
 });

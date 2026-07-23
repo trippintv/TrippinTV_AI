@@ -13,7 +13,9 @@ import NotificationsView from './components/NotificationsView';
 import PublicProfileView from './components/PublicProfileView';
 import SafetyDashboard from './components/SafetyDashboard';
 import DisclaimerOverlay from './components/DisclaimerOverlay';
-import { User, Video, ViewType, Comment, Message, ReactionType } from './types';
+import PostCard from './components/PostCard';
+import PostComposer from './components/PostComposer';
+import { User, Video, Post, ViewType, Comment, Message, ReactionType } from './types';
 import { supabase } from './src/lib/supabaseClient';
 
 const getToken = async (): Promise<string | null> => {
@@ -27,8 +29,10 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewType | 'safety'>('feed');
   const [viewUserId, setViewUserId] = useState<string | undefined>(undefined);
   const [videos, setVideos] = useState<Video[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isPostComposerOpen, setIsPostComposerOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [unreadChat, setUnreadChat] = useState(false);
 
@@ -71,13 +75,16 @@ const App: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, videosRes] = await Promise.all([
+        const [usersRes, videosRes, postsRes] = await Promise.all([
           fetch('/api/users'),
-          fetch('/api/videos')
+          fetch('/api/videos'),
+          fetch('/api/posts')
         ]);
         const users = await usersRes.json();
         const videos = await videosRes.json();
+        const posts = await postsRes.json();
         setAllUsers(users);
+        setPosts(Array.isArray(posts) ? posts : []);
         setVideos(videos);
 
         const savedUser = localStorage.getItem('trippin_user');
@@ -309,6 +316,63 @@ const App: React.FC = () => {
     }
   };
 
+  const handleAddPost = async (postData: { title?: string; text: string; category?: string }) => {
+    if (!user) { setIsAuthModalOpen(true); return; }
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/posts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ ...postData, username: user.username })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Post failed');
+      }
+      const post = await res.json();
+      setPosts([post, ...posts]);
+      setIsPostComposerOpen(false);
+      setUser(prev => prev ? { ...prev, points: (prev.points || 0) + 10 } : null);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handlePostComment = async (postId: string, commentData: Partial<Comment>, parentId?: string) => {
+    if (!user) { setIsAuthModalOpen(true); return; }
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/post-comments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ...commentData,
+          postId,
+          parentId,
+          username: user.username,
+          avatar: user.avatar
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Comment failed');
+      }
+      const newComment = await res.json();
+      setPosts(prev => prev.map(p =>
+        p.id === postId ? { ...p, comments: [...(p.comments || []), newComment] } : p
+      ));
+      setUser(prev => prev ? { ...prev, points: prev.points + 5 } : null);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const handleReact = async (videoId: string, type: ReactionType) => {
     if (!user) { setIsAuthModalOpen(true); return; }
     try {
@@ -393,6 +457,35 @@ const App: React.FC = () => {
             />
           )}
           {currentView === 'leaderboard' && <Leaderboard videos={videos} />}
+          {currentView === 'posts' && (
+            <div className="flex flex-col items-center gap-8 py-4">
+              {user && (
+                <button
+                  onClick={() => setIsPostComposerOpen(true)}
+                  className="w-full max-w-[420px] bg-zinc-900 border border-dashed border-purple-500/50 rounded-3xl py-4 text-zinc-400 hover:text-white hover:border-purple-500 transition-all text-sm font-bold"
+                >
+                  + Share a trippin' story (no video needed)
+                </button>
+              )}
+              {posts.length === 0 ? (
+                <div className="text-center py-20 max-w-[420px]">
+                  <p className="text-zinc-500 text-lg">No posts yet.</p>
+                  <p className="text-zinc-600 text-sm mt-2">Be the first to post something wild!</p>
+                </div>
+              ) : (
+                posts.map((post) => (
+                  <PostCard
+                    key={post.id}
+                    post={post}
+                    onComment={handlePostComment}
+                    onOpenProfile={handleOpenProfile}
+                    onShare={handleShare as any}
+                    user={user}
+                  />
+                ))
+              )}
+            </div>
+          )}
           {currentView === 'profile' && user && (
             <ProfileView 
               user={user} 
@@ -444,6 +537,15 @@ const App: React.FC = () => {
           />
         )}
 
+        {/* Post Composer */}
+        {isPostComposerOpen && user && (
+          <PostComposer
+            onClose={() => setIsPostComposerOpen(false)}
+            onPost={handleAddPost}
+            user={user}
+          />
+        )}
+
         {/* Disclaimer logic */}
         {user && !user.hasAgreedToDisclaimer && (
           <DisclaimerOverlay onAgree={handleAgreeDisclaimer} />
@@ -462,6 +564,10 @@ const App: React.FC = () => {
           <button onClick={() => setCurrentView('feed')} className={`flex flex-col items-center ${currentView === 'feed' ? 'text-purple-500' : 'text-zinc-400'}`}>
             <HomeIcon className="w-6 h-6" />
             <span className="text-[10px] mt-1">Home</span>
+          </button>
+          <button onClick={() => setCurrentView('posts')} className={`flex flex-col items-center ${currentView === 'posts' ? 'text-purple-500' : 'text-zinc-400'}`}>
+            <PostIcon className="w-6 h-6" />
+            <span className="text-[10px] mt-1">Posts</span>
           </button>
           <button onClick={() => setCurrentView('leaderboard')} className={`flex flex-col items-center ${currentView === 'leaderboard' ? 'text-purple-500' : 'text-zinc-400'}`}>
             <TrophyIcon className="w-6 h-6" />
@@ -507,6 +613,7 @@ const App: React.FC = () => {
 const HomeIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>;
 const TrophyIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138z" /></svg>;
 const PlusIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>;
+const PostIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5l5 5v11a2 2 0 01-2 2z" /></svg>;
 const UserIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>;
 const ChatIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>;
 const UserPlusIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v6m3-3h-6m-7.5-3a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0zM3 19a6 6 0 0112 0" /></svg>;
