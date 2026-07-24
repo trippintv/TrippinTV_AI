@@ -1,12 +1,31 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// https://vitejs.dev/config/
+// Strip `crossorigin` from <script> and <link> tags — it causes CORS errors
+// inside the Capacitor WebView (custom https://localhost scheme).
+function stripCrossorigin() {
+  return {
+    name: 'strip-crossorigin',
+    enforce: 'post',
+    transformIndexHtml(html: string) {
+      return html
+        .replace(/ crossorigin/g, '')
+        .replace(/crossorigin="[^"]*"/g, '');
+    },
+  };
+}
+
 export default defineConfig({
-  // Relative base so bundled assets load correctly inside the Capacitor
-  // WebView (custom https scheme resolves absolute /assets paths to nothing).
   base: './',
-  plugins: [react()],
+  plugins: [react(), stripCrossorigin()],
+  build: {
+    rollupOptions: {
+      output: {
+        assetFileNames: 'assets/[name]-[hash][extname]',
+        entryFileNames: 'assets/[name]-[hash].js',
+      },
+    },
+  },
   server: {
     port: 3000,
     proxy: {
