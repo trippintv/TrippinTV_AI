@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { User, Video, PublicProfile } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
+import { apiFetch } from '../src/lib/api';
 import VideoCard from './VideoCard';
 import { Comment, ReactionType, ReactionSummary } from '../types';
 
@@ -37,7 +38,7 @@ const PublicProfileView: React.FC<PublicProfileViewProps> = ({
   const loadProfile = useCallback(async () => {
     try {
       const token = await getToken();
-      const res = await fetch(`/api/users/${userId}/public`, token ? { headers: { 'Authorization': `Bearer ${token}` } } : {});
+      const res = await apiFetch(`/api/users/${userId}/public`, token ? { headers: { 'Authorization': `Bearer ${token}` } } : {});
       if (res.ok) setProfile(await res.json());
     } catch (err) {
       console.error(err);
@@ -51,8 +52,8 @@ const PublicProfileView: React.FC<PublicProfileViewProps> = ({
     const token = await getToken();
     try {
       const [fs, fl] = await Promise.all([
-        fetch(`/api/friends/status/${userId}`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()),
-        fetch(`/api/follow/status/${userId}`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()),
+        apiFetch(`/api/friends/status/${userId}`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()),
+        apiFetch(`/api/follow/status/${userId}`, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()),
       ]);
       setFriendStatus(fs.status);
       setFollowStatus(fl);

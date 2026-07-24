@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, Message } from '../types';
 import ReportModal from './ReportModal';
 import { supabase } from '../src/lib/supabaseClient';
+import { apiFetch } from '../src/lib/api';
 
 interface ChatViewProps {
   currentUser: User;
@@ -68,7 +69,7 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
   const fetchConversations = async () => {
     try {
       const token = await getToken();
-      const res = await fetch(`/api/conversations/${currentUser.id}`, {
+      const res = await apiFetch(`/api/conversations/${currentUser.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
@@ -86,7 +87,7 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
     if (selectedUser) {
       const fetchMessages = async () => {
         const token = await getToken();
-        const res = await fetch(`/api/messages/${currentUser.id}/${selectedUser.id}`, {
+        const res = await apiFetch(`/api/messages/${currentUser.id}/${selectedUser.id}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         setMessages(await res.json());
@@ -101,7 +102,7 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
     setIsSending(true);
     try {
       const token = await getToken();
-      const res = await fetch('/api/messages', {
+      const res = await apiFetch('/api/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -131,7 +132,7 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
   const fetchFriends = async () => {
     try {
       const token = await getToken();
-      const res = await fetch('/api/friends', { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await apiFetch('/api/friends', { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) {
         const data = await res.json();
         setFriends(data.friends || []);

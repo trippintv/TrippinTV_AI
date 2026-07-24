@@ -421,3 +421,4 @@ android/**/*.keystore
 android/**/*.jks
 android/keystore.properties
 android/trippintv-release.keystore
+trippintv-release.keystore

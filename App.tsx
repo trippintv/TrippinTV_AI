@@ -17,6 +17,7 @@ import PostCard from './components/PostCard';
 import PostComposer from './components/PostComposer';
 import { User, Video, Post, ViewType, Comment, Message, ReactionType } from './types';
 import { supabase } from './src/lib/supabaseClient';
+import { apiFetch } from './src/lib/api';
 
 const getToken = async (): Promise<string | null> => {
   const { data: { session } } = await supabase.auth.getSession();
@@ -76,9 +77,9 @@ const App: React.FC = () => {
     const fetchData = async () => {
       try {
         const [usersRes, videosRes, postsRes] = await Promise.all([
-          fetch('/api/users'),
-          fetch('/api/videos'),
-          fetch('/api/posts')
+          apiFetch('/api/users'),
+          apiFetch('/api/videos'),
+          apiFetch('/api/posts')
         ]);
         const users = await usersRes.json();
         const videos = await videosRes.json();
@@ -144,7 +145,7 @@ const App: React.FC = () => {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
-      const res = await fetch(`/api/users?id=${userId}`, {
+      const res = await apiFetch(`/api/users?id=${userId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -190,7 +191,7 @@ const App: React.FC = () => {
     if (!user) return;
     try {
       const token = await getToken();
-      const res = await fetch(`/api/users/${user.id}`, {
+      const res = await apiFetch(`/api/users/${user.id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -229,7 +230,7 @@ const App: React.FC = () => {
 
     try {
       const token = await getToken();
-      const res = await fetch(`/api/videos/${videoId}/vote`, {
+      const res = await apiFetch(`/api/videos/${videoId}/vote`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -264,7 +265,7 @@ const App: React.FC = () => {
       formData.append('title', newVideo.title);
       formData.append('description', newVideo.description);
 
-      const res = await fetch('/api/videos', {
+      const res = await apiFetch('/api/videos', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
@@ -288,7 +289,7 @@ const App: React.FC = () => {
     if (!user) { setIsAuthModalOpen(true); return; }
     try {
       const token = await getToken();
-      const res = await fetch('/api/comments', {
+      const res = await apiFetch('/api/comments', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -320,7 +321,7 @@ const App: React.FC = () => {
     if (!user) { setIsAuthModalOpen(true); return; }
     try {
       const token = await getToken();
-      const res = await fetch('/api/posts', {
+      const res = await apiFetch('/api/posts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -345,7 +346,7 @@ const App: React.FC = () => {
     if (!user) { setIsAuthModalOpen(true); return; }
     try {
       const token = await getToken();
-      const res = await fetch('/api/post-comments', {
+      const res = await apiFetch('/api/post-comments', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -377,7 +378,7 @@ const App: React.FC = () => {
     if (!user) { setIsAuthModalOpen(true); return; }
     try {
       const token = await getToken();
-      const res = await fetch(`/api/videos/${videoId}/react`, {
+      const res = await apiFetch(`/api/videos/${videoId}/react`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

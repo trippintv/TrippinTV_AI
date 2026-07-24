@@ -8,7 +8,7 @@ const config: CapacitorConfig = {
     // During development you can point the WebView at your dev server.
     // For a production build, leave this commented out so it serves from `dist`.
     // url: 'http://10.0.2.2:3000',
-    androidScheme: 'https',
+    androidScheme: 'http',
   },
   android: {
     // Allow the WebView to call your local backend during dev (cleartext).

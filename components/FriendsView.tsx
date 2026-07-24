@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { User, FriendsData, FriendRequest } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
+import { apiFetch } from '../src/lib/api';
 
 interface FriendsViewProps {
   currentUser: User;
@@ -27,7 +28,7 @@ const FriendsView: React.FC<FriendsViewProps> = ({ currentUser }) => {
   const loadFriends = useCallback(async () => {
     try {
       const token = await getToken();
-      const res = await fetch('/api/friends', { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await apiFetch('/api/friends', { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setData(await res.json());
     } catch (err) {
       console.error(err);
@@ -44,7 +45,7 @@ const FriendsView: React.FC<FriendsViewProps> = ({ currentUser }) => {
     setIsSearching(true);
     try {
       const token = await getToken();
-      const res = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await apiFetch(`/api/users/search?q=${encodeURIComponent(q)}`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setSearchResults(await res.json());
     } catch (err) {
       console.error(err);
@@ -57,7 +58,7 @@ const FriendsView: React.FC<FriendsViewProps> = ({ currentUser }) => {
     setBusyId(receiverId);
     try {
       const token = await getToken();
-      const res = await fetch('/api/friends/request', {
+      const res = await apiFetch('/api/friends/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ receiverId }),
@@ -82,7 +83,7 @@ const FriendsView: React.FC<FriendsViewProps> = ({ currentUser }) => {
     setBusyId(senderId);
     try {
       const token = await getToken();
-      const res = await fetch('/api/friends/accept', {
+      const res = await apiFetch('/api/friends/accept', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ senderId }),
@@ -100,7 +101,7 @@ const FriendsView: React.FC<FriendsViewProps> = ({ currentUser }) => {
     setBusyId(senderId);
     try {
       const token = await getToken();
-      const res = await fetch('/api/friends/reject', {
+      const res = await apiFetch('/api/friends/reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ senderId }),
@@ -117,7 +118,7 @@ const FriendsView: React.FC<FriendsViewProps> = ({ currentUser }) => {
     setBusyId(friendId);
     try {
       const token = await getToken();
-      const res = await fetch(`/api/friends/${friendId}`, {
+      const res = await apiFetch(`/api/friends/${friendId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });

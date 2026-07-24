@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Video, User, Comment, ReactionType, ReactionSummary } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
+import { apiFetch } from '../src/lib/api';
 import VideoCard from './VideoCard';
 
 interface VideoFeedProps {
@@ -51,8 +52,8 @@ const VideoFeed: React.FC<VideoFeedProps> = ({
       const results = await Promise.all(
         list.map(async (v) => {
           const [sumRes, myRes] = await Promise.all([
-            fetch(`/api/videos/${v.id}/reactions`),
-            user ? fetch(`/api/videos/${v.id}/react`, { method: 'GET', headers: { 'Authorization': `Bearer ${token}` } }) : Promise.resolve(null),
+            apiFetch(`/api/videos/${v.id}/reactions`),
+            user ? apiFetch(`/api/videos/${v.id}/react`, { method: 'GET', headers: { 'Authorization': `Bearer ${token}` } }) : Promise.resolve(null),
           ]);
           const summary = await sumRes.json();
           let mine: ReactionType[] = [];
@@ -83,7 +84,7 @@ const VideoFeed: React.FC<VideoFeedProps> = ({
       (async () => {
         try {
           const token = await getToken();
-          const res = await fetch('/api/feed/following', { headers: { 'Authorization': `Bearer ${token}` } });
+          const res = await apiFetch('/api/feed/following', { headers: { 'Authorization': `Bearer ${token}` } });
           const data = await res.json();
           setFollowingVideos(data);
           loadReactions(data);

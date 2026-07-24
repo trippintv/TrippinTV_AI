@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { User } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
-import { API_BASE } from '../src/lib/api';
+import { apiFetch, API_BASE } from '../src/lib/api';
 
 interface AuthModalProps {
   onClose: () => void;
@@ -34,7 +34,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onAuthSuccess }) => {
         // Bypass email confirmation dependency: confirm the user server-side
         // so login works immediately (email delivery may be rate-limited).
         try {
-          await fetch('/api/auth/confirm', {
+          await apiFetch('/api/auth/confirm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email }),

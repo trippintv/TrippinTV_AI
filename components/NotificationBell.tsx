@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Notification } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
+import { apiFetch } from '../src/lib/api';
 
 interface NotificationBellProps {
   onOpen: () => void; // open full notifications view
@@ -20,7 +21,7 @@ const NotificationBell: React.FC<NotificationBellProps> = ({ onOpen }) => {
   const load = async () => {
     try {
       const token = await getToken();
-      const res = await fetch('/api/notifications', { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await apiFetch('/api/notifications', { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) {
         const data = await res.json();
         setNotifications(data.notifications);
@@ -48,7 +49,7 @@ const NotificationBell: React.FC<NotificationBellProps> = ({ onOpen }) => {
   const markAllRead = async () => {
     try {
       const token = await getToken();
-      await fetch('/api/notifications/read', {
+      await apiFetch('/api/notifications/read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({}),
