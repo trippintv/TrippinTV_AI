@@ -149,9 +149,9 @@ app.get('/api/users', async (req: any, res: any) => {
       const users = await prisma.user.findMany();
       res.json(users);
     }
-  } catch (error) {
-    console.error(error);
-      res.status(500).json({ error: "Fetch failed" });
+  } catch (error: any) {
+    console.error("GET /api/users error:", error);
+      res.status(500).json({ error: "Fetch failed", detail: error?.message || String(error) });
   }
 });
 
@@ -370,8 +370,9 @@ app.get('/api/videos', async (req: any, res: any) => {
       orderBy: { createdAt: 'desc' }
     });
     res.json(videos);
-  } catch (error) {
-    res.status(500).json({ error: "DB Error" });
+  } catch (error: any) {
+    console.error("GET /api/videos error:", error);
+    res.status(500).json({ error: "DB Error", detail: error?.message || String(error) });
   }
 });
 
@@ -383,8 +384,9 @@ app.get('/api/posts', async (req: any, res: any) => {
       orderBy: { createdAt: 'desc' },
     });
     res.json(posts);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to load posts' });
+  } catch (error: any) {
+    console.error("GET /api/posts error:", error);
+    res.status(500).json({ error: 'Failed to load posts', detail: error?.message || String(error) });
   }
 });
 
