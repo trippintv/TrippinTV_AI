@@ -14,6 +14,27 @@
 </head>
 <body>
     <div id="root"></div>
+    <script>
+    // Catch module-load errors BEFORE React mounts (the in-bundle handler
+    // won't run if the bundle itself fails to load).
+    window.onerror = function(msg, src, line, col, err) {
+      var el = document.createElement('pre');
+      el.style.cssText = 'position:fixed;inset:0;background:#900;color:#fff;padding:16px;font:12px monospace;white-space:pre-wrap;z-index:99999;overflow:auto';
+      el.textContent = 'CRASH DETAILS:\n' +
+        'Message: ' + msg + '\n' +
+        'Source: ' + src + '\n' +
+        'Line: ' + line + '  Col: ' + col + '\n' +
+        'Error: ' + (err && err.stack ? err.stack : String(err));
+      document.body.appendChild(el);
+      return true;
+    };
+    window.addEventListener('unhandledrejection', function(e) {
+      var el = document.createElement('pre');
+      el.style.cssText = 'position:fixed;inset:0;background:#900;color:#fff;padding:16px;font:12px monospace;white-space:pre-wrap;z-index:99999;overflow:auto';
+      el.textContent = 'UNHANDLED PROMISE:\n' + String(e.reason && e.reason.stack ? e.reason.stack : e.reason);
+      document.body.appendChild(el);
+    });
+    </script>
     <script type="module" src="/index.tsx"></script>
 </body>
 </html>

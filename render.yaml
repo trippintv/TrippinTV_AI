@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: trippin-tv-api
+    runtime: node
+    buildCommand: npm install && npx prisma generate
+    startCommand: npx tsx server/index.ts
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
