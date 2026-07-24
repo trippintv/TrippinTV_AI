@@ -13,13 +13,10 @@ if (!rootElement) {
 // there is no browser devtools). Falls back to a visible red overlay instead
 // of a silent black screen.
 class ErrorOverlay extends React.Component<
-  { error: Error },
+  { children: React.ReactNode },
   { error: Error | null }
 > {
-  constructor(props: { error: Error }) {
-    super(props);
-    this.state = { error: props.error };
-  }
+  state: { error: Error | null } = { error: null };
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
@@ -46,23 +43,10 @@ class ErrorOverlay extends React.Component<
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <ErrorOverlay error={new Error('')}>
+    <ErrorOverlay>
       <App />
     </ErrorOverlay>
   </React.StrictMode>
 );
 
-window.addEventListener('error', (e) => {
-  const el = document.createElement('div');
-  el.style.cssText =
-    'position:fixed;inset:0;background:#900;color:#fff;padding:16px;font:13px monospace;white-space:pre-wrap;z-index:99999;overflow:auto';
-  el.textContent = 'WINDOW ERROR:\n' + (e.error?.stack || e.message);
-  document.body.appendChild(el);
-});
-window.addEventListener('unhandledrejection', (e) => {
-  const el = document.createElement('div');
-  el.style.cssText =
-    'position:fixed;inset:0;background:#900;color:#fff;padding:16px;font:13px monospace;white-space:pre-wrap;z-index:99999;overflow:auto';
-  el.textContent = 'UNHANDLED PROMISE:\n' + String(e.reason);
-  document.body.appendChild(el);
-});
+
