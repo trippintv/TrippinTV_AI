@@ -865,7 +865,7 @@ app.delete('/api/safety', authenticateUser, adminUser, async (req: any, res: any
 const distPath = path.resolve(process.cwd(), 'dist');
 app.use(express.static(distPath));
 // SPA fallback: non-API routes serve index.html
-app.get('*', (req, res) => {
+app.get('/{*splat}', (req, res) => {
   if (!req.path.startsWith('/api')) {
     res.sendFile(path.join(distPath, 'index.html'));
   }
