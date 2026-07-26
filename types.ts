@@ -30,6 +30,8 @@ export interface Post {
   category?: string | null;
   comments: Comment[];
   createdAt: string;
+  reactionSummary?: ReactionSummary;
+  userReactions?: ReactionType[];
 }
 
 export interface Video {
@@ -85,6 +87,12 @@ export interface ReactionSummary {
   eyes: number;
 }
 
+export interface NotificationActor {
+  id: string;
+  username: string;
+  avatar?: string | null;
+}
+
 export interface Notification {
   id: string;
   recipientId: string;
@@ -94,6 +102,7 @@ export interface Notification {
   text: string;
   read: boolean;
   createdAt: string;
+  actor?: NotificationActor | null;
 }
 
 export interface PublicProfile {

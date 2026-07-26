@@ -167,6 +167,11 @@ app.post('/api/friends/request', authenticateUser, async (req: any, res: any) =>
     }
     const { data: reqRow, error } = await db.from('FriendRequest').insert({ senderId, receiverId, status: 'pending' }).select().single();
     if (error) throw error;
+    const { data: sender } = await db.from('User').select('username').eq('id', senderId).single();
+    await createNotification({
+      recipientId: receiverId, actorId: senderId, type: 'friend_request',
+      text: `${sender?.username || 'Someone'} sent you a friend request`,
+    });
     res.status(201).json(reqRow);
   } catch (error) {
     console.error(error);
@@ -484,6 +489,45 @@ app.post('/api/post-comments', authenticateUser, async (req: any, res: any) => {
   }
 });
 
+app.post('/api/posts/:id/react', authenticateUser, async (req: any, res: any) => {
+  const { id: postId } = req.params;
+  const { type } = req.body;
+  const userId = req.user.id;
+  if (!REACTION_TYPES.includes(type)) return res.status(400).json({ error: 'Invalid reaction type' });
+  try {
+    const { data: existing } = await db.from('ReactionOnPost')
+      .select('id').eq('postId', postId).eq('userId', userId).eq('type', type).maybeSingle();
+    if (existing) {
+      await db.from('ReactionOnPost').delete().eq('id', existing.id);
+    } else {
+      await db.from('ReactionOnPost').insert({ postId, userId, type });
+      const { data: post } = await db.from('Post').select('userId, username').eq('id', postId).single();
+      if (post && post.userId !== userId) {
+        const emoji = type === 'fire' ? '🔥' : type === 'laugh' ? '😂' : type === 'skull' ? '💀' : type === 'heart' ? '❤️' : '👀';
+        await createNotification({ recipientId: post.userId, actorId: userId, type: 'video_vote', entityId: postId, text: `${req.user.user_metadata?.username || 'Someone'} reacted ${emoji} to your post` });
+      }
+    }
+    const { data: counts } = await db.rpc('get_post_reaction_counts', { post_id: postId });
+    const { data: userReactions } = await db.rpc('get_user_post_reactions', { post_id: postId, uid: userId });
+    const summary = (counts || []).reduce((acc: any, r: any) => { acc[r.type] = Number(r.count); return acc; }, {});
+    const userReacts = (userReactions || []).map((r: any) => r.type);
+    res.json({ summary, userReactions: userReacts });
+  } catch (error) {
+    res.status(500).json({ error: 'Reaction failed' });
+  }
+});
+
+app.get('/api/posts/:id/reactions', async (req: any, res: any) => {
+  const { id: postId } = req.params;
+  try {
+    const { data: counts } = await db.rpc('get_post_reaction_counts', { post_id: postId });
+    const summary = (counts || []).reduce((acc: any, r: any) => { acc[r.type] = Number(r.count); return acc; }, {});
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load reactions' });
+  }
+});
+
 app.post('/api/comments', authenticateUser, async (req: any, res: any) => {
   const { videoId, username, avatar, text, parentId } = req.body;
   const userId = req.user.id;
@@ -557,9 +601,29 @@ app.get('/api/conversations/:id', authenticateUser, async (req: any, res: any) =
       const { sender: _s, receiver: _r, ...lastMessage } = msg as any;
       conversations.push({ user: partner, lastMessage });
     }
-    res.json(conversations);
+    const convsWithUnread = await Promise.all(conversations.map(async (conv) => {
+      const { count } = await db.from('Message')
+        .select('*', { count: 'exact', head: true })
+        .eq('senderId', conv.user.id).eq('receiverId', id).is('readAt', null);
+      return { ...conv, unreadCount: count || 0 };
+    }));
+    res.json(convsWithUnread);
   } catch (error) {
     res.status(500).json({ error: "Conversation fetch failed" });
+  }
+});
+
+app.post('/api/messages/mark-read', authenticateUser, async (req: any, res: any) => {
+  const userId = req.user.id;
+  const { senderId } = req.body;
+  if (!senderId) return res.status(400).json({ error: 'senderId is required' });
+  try {
+    await db.from('Message')
+      .update({ readAt: new Date().toISOString() })
+      .eq('senderId', senderId).eq('receiverId', userId).is('readAt', null);
+    res.json({ status: 'ok' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to mark messages read' });
   }
 });
 
@@ -567,7 +631,8 @@ app.get('/api/conversations/:id', authenticateUser, async (req: any, res: any) =
 app.get('/api/notifications', authenticateUser, async (req: any, res: any) => {
   const userId = req.user.id;
   try {
-    const { data: notifications } = await db.from('Notification').select('*')
+    const { data: notifications } = await db.from('Notification')
+      .select('*, actor:User!Notification_actorId_fkey(id, username, avatar)')
       .eq('recipientId', userId).order('createdAt', { ascending: false }).limit(50);
     const unread = (notifications || []).filter(n => !n.read).length;
     res.json({ notifications: notifications || [], unread });

@@ -1,7 +1,15 @@
 import React, { useState } from 'react';
-import { Post, User, Comment } from '../types';
+import { Post, User, Comment, ReactionType, ReactionSummary } from '../types';
 import { moderateContent } from '../services/geminiService';
 import ReportModal from './ReportModal';
+
+const REACTIONS: { type: ReactionType; emoji: string; label: string }[] = [
+  { type: 'fire', emoji: '🔥', label: 'Fire' },
+  { type: 'laugh', emoji: '😂', label: 'Laugh' },
+  { type: 'skull', emoji: '💀', label: 'Skull' },
+  { type: 'heart', emoji: '❤️', label: 'Love' },
+  { type: 'eyes', emoji: '👀', label: 'Eyes' },
+];
 
 interface PostCardProps {
   post: Post;
@@ -9,6 +17,7 @@ interface PostCardProps {
   user: User | null;
   onOpenProfile: (userId: string) => void;
   onShare: (post: Post) => void;
+  onReact: (postId: string, type: ReactionType) => void;
 }
 
 const PostCard: React.FC<PostCardProps> = ({
@@ -17,12 +26,17 @@ const PostCard: React.FC<PostCardProps> = ({
   user,
   onOpenProfile,
   onShare,
+  onReact,
 }) => {
   const [commentText, setCommentText] = useState('');
   const [replyTo, setReplyTo] = useState<{ id: string; username: string } | null>(null);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const [showReactions, setShowReactions] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+
+  const summary = post.reactionSummary || {};
+  const userReactions = post.userReactions || [];
 
   const handlePostComment = async () => {
     if (!commentText.trim() || !user) return;
@@ -75,6 +89,20 @@ const PostCard: React.FC<PostCardProps> = ({
         <p className="text-zinc-200 text-sm leading-relaxed whitespace-pre-wrap break-words">{post.text}</p>
       </div>
 
+      {/* Reaction summary bar */}
+      {Object.values(summary as Record<string, number>).some(v => v > 0) && (
+        <div className="px-5 pb-2 flex items-center gap-2 flex-wrap">
+          {Object.entries(summary as Record<string, number>).filter(([, count]) => count > 0).map(([type, count]) => {
+            const r = REACTIONS.find(x => x.type === type);
+            return (
+              <span key={type} className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${userReactions.includes(type as ReactionType) ? 'bg-pink-600/20 border-pink-500/40 text-pink-300' : 'bg-zinc-800 border-zinc-700 text-zinc-400'}`}>
+                {r?.emoji} {count}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {/* Action bar */}
       <div className="flex items-center gap-6 px-5 py-3 border-t border-zinc-800 text-zinc-400">
         <button
@@ -84,6 +112,32 @@ const PostCard: React.FC<PostCardProps> = ({
           <ChatIcon className="w-5 h-5" />
           <span className="text-xs font-bold">{post.comments.length}</span>
         </button>
+
+        <div className="relative">
+          <button
+            onClick={() => setShowReactions(!showReactions)}
+            className={`flex items-center gap-2 transition-colors ${userReactions.length > 0 ? 'text-pink-400' : 'hover:text-white'}`}
+          >
+            <span className="text-lg leading-none">😂</span>
+            <span className="text-xs font-bold">{Object.values(summary as Record<string, number>).reduce((a, b) => a + b, 0) || 'React'}</span>
+          </button>
+
+          {showReactions && (
+            <div className="absolute bottom-8 left-0 z-20 bg-zinc-800/95 backdrop-blur rounded-2xl p-2 flex gap-1 shadow-2xl border border-zinc-700">
+              {REACTIONS.map(r => (
+                <button
+                  key={r.type}
+                  onClick={() => { onReact(post.id, r.type); setShowReactions(false); }}
+                  className={`text-2xl p-2 rounded-xl transition-transform hover:scale-125 ${userReactions.includes(r.type) ? 'bg-pink-600/40 ring-1 ring-pink-400' : 'hover:bg-zinc-700'}`}
+                  title={r.label}
+                >
+                  {r.emoji}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <button onClick={() => onShare(post)} className="flex items-center gap-2 hover:text-white transition-colors">
           <ShareIcon className="w-5 h-5" />
           <span className="text-xs font-bold">Share</span>

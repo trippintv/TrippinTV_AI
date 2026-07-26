@@ -15,7 +15,7 @@ import SafetyDashboard from './components/SafetyDashboard';
 import DisclaimerOverlay from './components/DisclaimerOverlay';
 import PostCard from './components/PostCard';
 import PostComposer from './components/PostComposer';
-import { User, Video, Post, ViewType, Comment, Message, ReactionType } from './types';
+import { User, Video, Post, ViewType, Comment, Message, ReactionType, ReactionSummary } from './types';
 import { supabase } from './src/lib/supabaseClient';
 import { apiFetch } from './src/lib/api';
 
@@ -35,7 +35,9 @@ const App: React.FC = () => {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isPostComposerOpen, setIsPostComposerOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [unreadChat, setUnreadChat] = useState(false);
+  const [unreadChat, setUnreadChat] = useState(0);
+  const [postReactions, setPostReactions] = useState<Record<string, ReactionSummary>>({});
+  const [postUserReactions, setPostUserReactions] = useState<Record<string, ReactionType[]>>({});
 
   // Supabase Realtime setup
   useEffect(() => {
@@ -47,7 +49,7 @@ const App: React.FC = () => {
         const msg = payload.new as Message;
         if (msg.senderId !== user.id) {
           if (currentView !== 'chat') {
-            setUnreadChat(true);
+            setUnreadChat(prev => prev + 1);
           }
         }
       })
@@ -68,7 +70,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (currentView === 'chat') {
-      setUnreadChat(false);
+      setUnreadChat(0);
     }
   }, [currentView]);
 
@@ -87,6 +89,21 @@ const App: React.FC = () => {
         setAllUsers(users);
         setPosts(Array.isArray(posts) ? posts : []);
         setVideos(videos);
+
+        if (Array.isArray(posts) && posts.length > 0) {
+          const postResults = await Promise.all(
+            posts.map(async (p: Post) => {
+              try {
+                const sumRes = await apiFetch(`/api/posts/${p.id}/reactions`);
+                const summary = await sumRes.json();
+                return { id: p.id, summary };
+              } catch { return { id: p.id, summary: {} }; }
+            })
+          );
+          const sumMap: Record<string, ReactionSummary> = {};
+          postResults.forEach(r => { sumMap[r.id] = r.summary; });
+          setPostReactions(sumMap);
+        }
 
         const savedUser = localStorage.getItem('trippin_user');
         if (savedUser) {
@@ -397,6 +414,31 @@ const App: React.FC = () => {
     }
   };
 
+  const handlePostReact = async (postId: string, type: ReactionType) => {
+    if (!user) { setIsAuthModalOpen(true); return; }
+    try {
+      const token = await getToken();
+      const res = await apiFetch(`/api/posts/${postId}/react`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ type })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPostReactions(prev => ({ ...prev, [postId]: data.summary }));
+        setPostUserReactions(prev => ({ ...prev, [postId]: data.userReactions }));
+        setPosts(prev => prev.map(p =>
+          p.id === postId ? { ...p, reactionSummary: data.summary, userReactions: data.userReactions } : p
+        ));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleOpenProfile = (userId: string) => {
     setViewUserId(userId);
     setCurrentView('user');
@@ -442,7 +484,7 @@ const App: React.FC = () => {
           currentView={currentView as any}
           onLogout={handleLogout}
           unreadChat={unreadChat}
-          notificationBell={user ? <NotificationBell onOpen={() => { setCurrentView('notifications'); window.history.pushState({}, '', '/notifications'); }} /> : undefined}
+          notificationBell={user ? <NotificationBell onOpen={() => { setCurrentView('notifications'); window.history.pushState({}, '', '/notifications'); }} onNavigate={(view, userId) => { setCurrentView(view as any); if (userId) setViewUserId(userId); window.history.pushState({}, '', userId ? `/u/${userId}` : `/${view}`); }} /> : undefined}
         />
 
         <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-4 mb-20 md:mb-0">
@@ -481,6 +523,7 @@ const App: React.FC = () => {
                     onComment={handlePostComment}
                     onOpenProfile={handleOpenProfile}
                     onShare={handleShare as any}
+                    onReact={handlePostReact}
                     user={user}
                   />
                 ))
@@ -504,7 +547,7 @@ const App: React.FC = () => {
             <FriendsView currentUser={user} />
           )}
           {currentView === 'notifications' && user && (
-            <NotificationsView />
+            <NotificationsView onNavigate={(view, userId) => { setCurrentView(view as any); if (userId) setViewUserId(userId); window.history.pushState({}, '', userId ? `/u/${userId}` : `/${view}`); }} />
           )}
           {currentView === 'user' && viewUserId && (
             <PublicProfileView 
@@ -588,8 +631,10 @@ const App: React.FC = () => {
             <button onClick={() => setCurrentView('chat')} className={`flex flex-col items-center relative ${currentView === 'chat' ? 'text-purple-500' : 'text-zinc-400'}`}>
               <ChatIcon className="w-6 h-6" />
               <span className="text-[10px] mt-1">Chat</span>
-              {unreadChat && (
-                <div className="absolute top-0 right-1/4 w-2 h-2 bg-red-500 rounded-full border border-black animate-pulse"></div>
+              {unreadChat > 0 && (
+                <span className="absolute -top-0.5 right-0 min-w-[14px] h-3.5 px-0.5 bg-red-500 rounded-full text-[8px] font-black text-white flex items-center justify-center border border-black animate-pulse">
+                  {unreadChat > 99 ? '99+' : unreadChat}
+                </span>
               )}
             </button>
           )}

@@ -4,10 +4,20 @@ import { supabase } from '../src/lib/supabaseClient';
 import { apiFetch } from '../src/lib/api';
 
 interface NotificationBellProps {
-  onOpen: () => void; // open full notifications view
+  onOpen: () => void;
+  onNavigate: (view: string, userId?: string) => void;
 }
 
-const NotificationBell: React.FC<NotificationBellProps> = ({ onOpen }) => {
+const NOTIF_ICON: Record<string, string> = {
+  friend_request: '🔔',
+  friend_accepted: '✅',
+  video_vote: '🔥',
+  new_follow: '❤️',
+  comment: '💬',
+  message: '✉️',
+};
+
+const NotificationBell: React.FC<NotificationBellProps> = ({ onOpen, onNavigate }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
@@ -61,10 +71,40 @@ const NotificationBell: React.FC<NotificationBellProps> = ({ onOpen }) => {
     }
   };
 
+  const markSingleRead = async (n: Notification) => {
+    if (n.read) return;
+    try {
+      const token = await getToken();
+      await apiFetch('/api/notifications/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ id: n.id }),
+      });
+      setUnread(prev => Math.max(0, prev - 1));
+      setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleClick = (n: Notification) => {
+    markSingleRead(n);
+    setOpen(false);
+    if (n.type === 'friend_request' || n.type === 'friend_accepted' || n.type === 'new_follow') {
+      if (n.actorId) onNavigate('user', n.actorId);
+    } else if (n.type === 'video_vote' || (n.type === 'comment' && n.entityId)) {
+      onNavigate('feed');
+    } else if (n.type === 'comment' && n.entityId) {
+      onNavigate('posts');
+    } else if (n.type === 'message') {
+      onNavigate('chat');
+    }
+  };
+
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => { setOpen(!open); if (!open) markAllRead(); }}
+        onClick={() => setOpen(!open)}
         className="relative p-2 rounded-full hover:bg-zinc-800 transition-colors"
         title="Notifications"
       >
@@ -82,16 +122,35 @@ const NotificationBell: React.FC<NotificationBellProps> = ({ onOpen }) => {
         <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-[70]">
           <div className="p-3 border-b border-zinc-800 flex items-center justify-between">
             <span className="font-black text-sm">Notifications</span>
-            <button onClick={onOpen} className="text-[10px] text-purple-400 font-bold uppercase tracking-widest hover:underline">See all</button>
+            <div className="flex items-center gap-3">
+              {unread > 0 && (
+                <button onClick={markAllRead} className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest hover:text-white">Mark all read</button>
+              )}
+              <button onClick={() => { setOpen(false); onOpen(); }} className="text-[10px] text-purple-400 font-bold uppercase tracking-widest hover:underline">See all</button>
+            </div>
           </div>
           {notifications.length === 0 ? (
             <p className="p-6 text-center text-zinc-600 text-xs">No notifications yet</p>
           ) : (
             notifications.slice(0, 10).map(n => (
-              <div key={n.id} className={`p-3 border-b border-zinc-800/50 text-sm ${n.read ? 'text-zinc-400' : 'text-white bg-zinc-800/30'}`}>
-                {n.text}
-                <p className="text-[10px] text-zinc-600 mt-0.5">{new Date(n.createdAt).toLocaleDateString()}</p>
-              </div>
+              <button
+                key={n.id}
+                onClick={() => handleClick(n)}
+                className={`w-full text-left p-3 border-b border-zinc-800/50 text-sm hover:bg-zinc-800/50 transition-colors ${n.read ? 'text-zinc-400' : 'text-white bg-zinc-800/30'}`}
+              >
+                <div className="flex items-start gap-2">
+                  {n.actor?.avatar ? (
+                    <img src={n.actor.avatar} alt="" className="w-6 h-6 rounded-full object-cover flex-shrink-0 mt-0.5" />
+                  ) : (
+                    <span className="text-base flex-shrink-0 mt-0.5">{NOTIF_ICON[n.type] || '🔔'}</span>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="truncate">{n.text}</p>
+                    <p className="text-[10px] text-zinc-600 mt-0.5">{new Date(n.createdAt).toLocaleDateString()}</p>
+                  </div>
+                  {!n.read && <div className="w-2 h-2 bg-purple-500 rounded-full flex-shrink-0 mt-1.5" />}
+                </div>
+              </button>
             ))
           )}
         </div>
