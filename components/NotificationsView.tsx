@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Notification } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
 import { apiFetch } from '../src/lib/api';
@@ -19,30 +19,56 @@ const NOTIF_ICON: Record<string, string> = {
 const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const loaderRef = useRef<HTMLDivElement>(null);
 
   const getToken = async (): Promise<string | null> => {
     const { data: { session } } = await supabase.auth.getSession();
     return session?.access_token ?? null;
   };
 
-  const load = async () => {
+  const load = async (before?: string) => {
     try {
       const token = await getToken();
-      const res = await apiFetch('/api/notifications', { headers: { 'Authorization': `Bearer ${token}` } });
+      const url = before ? `/api/notifications?before=${before}` : '/api/notifications';
+      const res = await apiFetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) {
         const data = await res.json();
-        setNotifications(data.notifications);
+        if (before) {
+          setNotifications(prev => [...prev, ...data.notifications]);
+        } else {
+          setNotifications(data.notifications);
+        }
+        setHasMore(data.hasMore);
       }
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
   useEffect(() => {
     load();
   }, []);
+
+  const loadMore = useCallback(() => {
+    if (loadingMore || !hasMore || notifications.length === 0) return;
+    setLoadingMore(true);
+    const last = notifications[notifications.length - 1];
+    load(last.createdAt);
+  }, [loadingMore, hasMore, notifications]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) loadMore(); },
+      { threshold: 0.1 }
+    );
+    if (loaderRef.current) observer.observe(loaderRef.current);
+    return () => observer.disconnect();
+  }, [loadMore]);
 
   const markAllRead = async () => {
     try {
@@ -125,6 +151,10 @@ const NotificationsView: React.FC<NotificationsViewProps> = ({ onNavigate }) => 
               </div>
             </button>
           ))}
+          <div ref={loaderRef} className="py-4 text-center">
+            {loadingMore && <p className="text-zinc-500 text-xs">Loading more...</p>}
+            {!hasMore && notifications.length > 0 && <p className="text-zinc-700 text-[10px] uppercase tracking-widest">All caught up</p>}
+          </div>
         </div>
       )}
     </div>

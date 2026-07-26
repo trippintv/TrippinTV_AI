@@ -434,10 +434,16 @@ app.get('/api/follow/status/:userId', authenticateUser, async (req: any, res: an
 
 // --- Posts ---
 app.get('/api/posts', async (req: any, res: any) => {
+  const { before, limit: limitParam } = req.query;
+  const pageSize = Math.min(parseInt(limitParam as string) || 20, 50);
   try {
-    const { data: posts, error } = await db.from('Post').select('*, Comment(*)').order('createdAt', { ascending: false });
+    let query = db.from('Post').select('*, Comment(*)').order('createdAt', { ascending: false }).limit(pageSize + 1);
+    if (before) query = query.lt('createdAt', before);
+    const { data: posts, error } = await query;
     if (error) throw error;
-    res.json(posts || []);
+    const hasMore = (posts || []).length > pageSize;
+    const items = (posts || []).slice(0, pageSize);
+    res.json({ posts: items, hasMore });
   } catch (error: any) {
     console.error("GET /api/posts error:", error);
     res.status(500).json({ error: 'Failed to load posts', detail: error?.message || String(error) });
@@ -557,13 +563,19 @@ app.post('/api/comments', authenticateUser, async (req: any, res: any) => {
 // --- Messages ---
 app.get('/api/messages/:u1/:u2', authenticateUser, async (req: any, res: any) => {
   const { u1, u2 } = req.params;
+  const { before, limit: limitParam } = req.query;
+  const pageSize = Math.min(parseInt(limitParam as string) || 50, 100);
   if (req.user.id !== u1 && req.user.id !== u2) return res.status(403).json({ error: "Unauthorized to view this chat" });
   if (!(await areFriends(u1, u2))) return res.status(403).json({ error: "You can only view chats with friends" });
   try {
-    const { data: messages } = await db.from('Message').select('*')
+    let query = db.from('Message').select('*')
       .or(`senderId.eq.${u1},receiverId.eq.${u1},senderId.eq.${u2},receiverId.eq.${u2}`)
-      .order('createdAt', { ascending: true });
-    res.json(messages || []);
+      .order('createdAt', { ascending: false }).limit(pageSize + 1);
+    if (before) query = query.lt('createdAt', before);
+    const { data: messages } = await query;
+    const hasMore = (messages || []).length > pageSize;
+    const items = (messages || []).slice(0, pageSize).reverse();
+    res.json({ messages: items, hasMore });
   } catch (error) {
     res.status(500).json({ error: "Message fetch failed" });
   }
@@ -630,12 +642,20 @@ app.post('/api/messages/mark-read', authenticateUser, async (req: any, res: any)
 // --- Notifications ---
 app.get('/api/notifications', authenticateUser, async (req: any, res: any) => {
   const userId = req.user.id;
+  const { before, limit: limitParam } = req.query;
+  const pageSize = Math.min(parseInt(limitParam as string) || 20, 50);
   try {
-    const { data: notifications } = await db.from('Notification')
+    let query = db.from('Notification')
       .select('*, actor:User!Notification_actorId_fkey(id, username, avatar)')
-      .eq('recipientId', userId).order('createdAt', { ascending: false }).limit(50);
-    const unread = (notifications || []).filter(n => !n.read).length;
-    res.json({ notifications: notifications || [], unread });
+      .eq('recipientId', userId).order('createdAt', { ascending: false }).limit(pageSize + 1);
+    if (before) query = query.lt('createdAt', before);
+    const { data: notifications } = await query;
+    const hasMore = (notifications || []).length > pageSize;
+    const items = (notifications || []).slice(0, pageSize);
+    const unreadRes = await db.from('Notification').select('*', { count: 'exact', head: true })
+      .eq('recipientId', userId).eq('read', false);
+    const unread = unreadRes.count || 0;
+    res.json({ notifications: items, unread, hasMore });
   } catch (error) {
     res.status(500).json({ error: 'Failed to load notifications' });
   }

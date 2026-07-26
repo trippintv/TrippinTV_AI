@@ -24,6 +24,8 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
   const [isSending, setIsSending] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'recent' | 'explore'>('recent');
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -89,7 +91,9 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
         const res = await apiFetch(`/api/messages/${currentUser.id}/${selectedUser.id}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        setMessages(await res.json());
+        const data = await res.json();
+        setMessages(data.messages || []);
+        setHasMoreMessages(data.hasMore);
       };
       fetchMessages();
 
@@ -105,6 +109,25 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
       markRead().catch(console.error);
     }
   }, [selectedUser, currentUser.id]);
+
+  const loadMoreMessages = async () => {
+    if (!selectedUser || loadingMoreMessages || !hasMoreMessages || messages.length === 0) return;
+    setLoadingMoreMessages(true);
+    try {
+      const token = await getToken();
+      const oldest = messages[0];
+      const res = await apiFetch(`/api/messages/${currentUser.id}/${selectedUser.id}?before=${oldest.createdAt}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setMessages(prev => [...(data.messages || []), ...prev]);
+      setHasMoreMessages(data.hasMore);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingMoreMessages(false);
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!selectedUser || !newMessage.trim()) return;
@@ -252,6 +275,17 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
             </div>
             
             <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+              {hasMoreMessages && (
+                <div className="text-center py-2">
+                  <button
+                    onClick={loadMoreMessages}
+                    disabled={loadingMoreMessages}
+                    className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest hover:text-white transition-colors"
+                  >
+                    {loadingMoreMessages ? 'Loading...' : 'Load older messages'}
+                  </button>
+                </div>
+              )}
               {messages.map(msg => (
                 <div 
                   key={msg.id} 

@@ -38,6 +38,8 @@ const App: React.FC = () => {
   const [unreadChat, setUnreadChat] = useState(0);
   const [postReactions, setPostReactions] = useState<Record<string, ReactionSummary>>({});
   const [postUserReactions, setPostUserReactions] = useState<Record<string, ReactionType[]>>({});
+  const [hasMorePosts, setHasMorePosts] = useState(true);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
 
   // Supabase Realtime setup
   useEffect(() => {
@@ -85,14 +87,16 @@ const App: React.FC = () => {
         ]);
         const users = await usersRes.json();
         const videos = await videosRes.json();
-        const posts = await postsRes.json();
+        const postsData = await postsRes.json();
+        const postList = postsData.posts || [];
         setAllUsers(users);
-        setPosts(Array.isArray(posts) ? posts : []);
+        setPosts(postList);
+        setHasMorePosts(postsData.hasMore);
         setVideos(videos);
 
-        if (Array.isArray(posts) && posts.length > 0) {
+        if (postList.length > 0) {
           const postResults = await Promise.all(
-            posts.map(async (p: Post) => {
+            postList.map(async (p: Post) => {
               try {
                 const sumRes = await apiFetch(`/api/posts/${p.id}/reactions`);
                 const summary = await sumRes.json();
@@ -131,6 +135,37 @@ const App: React.FC = () => {
     };
     fetchData();
   }, []);
+
+  const loadMorePosts = async () => {
+    if (loadingMorePosts || !hasMorePosts || posts.length === 0) return;
+    setLoadingMorePosts(true);
+    try {
+      const last = posts[posts.length - 1];
+      const res = await apiFetch(`/api/posts?before=${last.createdAt}`);
+      const data = await res.json();
+      const newPosts = data.posts || [];
+      setPosts(prev => [...prev, ...newPosts]);
+      setHasMorePosts(data.hasMore);
+      if (newPosts.length > 0) {
+        const postResults = await Promise.all(
+          newPosts.map(async (p: Post) => {
+            try {
+              const sumRes = await apiFetch(`/api/posts/${p.id}/reactions`);
+              const summary = await sumRes.json();
+              return { id: p.id, summary };
+            } catch { return { id: p.id, summary: {} }; }
+          })
+        );
+        const sumMap: Record<string, ReactionSummary> = {};
+        postResults.forEach(r => { sumMap[r.id] = r.summary; });
+        setPostReactions(prev => ({ ...prev, ...sumMap }));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingMorePosts(false);
+    }
+  };
 
   // Handle browser back/forward for deep links
   useEffect(() => {
@@ -527,6 +562,15 @@ const App: React.FC = () => {
                     user={user}
                   />
                 ))
+              )}
+              {hasMorePosts && posts.length > 0 && (
+                <button
+                  onClick={loadMorePosts}
+                  disabled={loadingMorePosts}
+                  className="text-xs text-zinc-500 font-bold uppercase tracking-widest hover:text-white transition-colors py-4"
+                >
+                  {loadingMorePosts ? 'Loading...' : 'Load more'}
+                </button>
               )}
             </div>
           )}
