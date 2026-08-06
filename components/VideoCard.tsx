@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Video, User, Comment, ReactionType, ReactionSummary } from '../types';
 import { moderateContent } from '../services/geminiService';
 import ReportModal from './ReportModal';
+import { useToast } from './Toast';
 
 interface VideoCardProps {
   video: Video;
@@ -42,9 +43,30 @@ const VideoCard: React.FC<VideoCardProps> = ({
   const [showReactions, setShowReactions] = useState(false);
   const [showTapOverlay, setShowTapOverlay] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const { showToast } = useToast();
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const lastTap = useRef<number>(0);
+
+  // Auto-play/pause based on visibility
+  useEffect(() => {
+    const video = videoRef.current;
+    const card = cardRef.current;
+    if (!video || !card) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          video.play().catch(() => {});
+        } else {
+          video.pause();
+        }
+      },
+      { threshold: 0.6 }
+    );
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, []);
 
   const handleVideoClick = () => {
     const now = Date.now();
@@ -83,7 +105,7 @@ const VideoCard: React.FC<VideoCardProps> = ({
       setCommentText('');
       setReplyTo(null);
     } else {
-      alert(`Safety Alert: Comment blocked. ${result.reason}`);
+      showToast(`Safety Alert: Comment blocked. ${result.reason}`, 'error');
     }
     setIsAiProcessing(false);
   };
@@ -95,7 +117,7 @@ const VideoCard: React.FC<VideoCardProps> = ({
   const summary: ReactionSummary = reactionSummary || { fire: 0, laugh: 0, skull: 0, heart: 0, eyes: 0 };
 
   return (
-    <div className="bg-zinc-900 rounded-3xl overflow-hidden w-full max-w-[420px] shadow-2xl border border-zinc-800 group relative">
+    <div ref={cardRef} className="bg-zinc-900 rounded-3xl overflow-hidden w-full max-w-[420px] shadow-2xl border border-zinc-800 group relative">
       <div className="relative aspect-[9/16] bg-black cursor-pointer" onClick={handleVideoClick}>
         <video
           ref={videoRef}

@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { addSafetyReport } from '../services/SafetyService';
+import { useToast } from './Toast';
 
 interface ReportModalProps {
   onClose: () => void;
@@ -13,6 +14,7 @@ const ReportModal: React.FC<ReportModalProps> = ({ onClose, contentTitle, catego
   const [reason, setReason] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const { showToast } = useToast();
 
   const handleSubmit = async () => {
     if (!reason.trim()) return;
@@ -31,7 +33,7 @@ const ReportModal: React.FC<ReportModalProps> = ({ onClose, contentTitle, catego
         onClose();
       }, 2000);
     } catch (err) {
-      alert("Failed to submit report");
+      showToast("Failed to submit report", 'error');
     } finally {
       setIsSending(false);
     }

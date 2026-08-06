@@ -12,9 +12,10 @@ interface NavbarProps {
   onLogout: () => void;
   unreadChat?: number;
   notificationBell?: React.ReactNode;
+  onSearchClick?: () => void;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onViewChange, currentView, onLogout, unreadChat, notificationBell }) => {
+const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onViewChange, currentView, onLogout, unreadChat, notificationBell, onSearchClick }) => {
   return (
     <nav className="sticky top-0 z-50 bg-black/80 backdrop-blur-md border-b border-zinc-800 px-4 md:px-8 py-3 flex justify-between items-center">
       <div 
@@ -31,7 +32,9 @@ const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onVie
           <input 
             type="text" 
             placeholder="Search wild trips..." 
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-full py-2 px-10 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/50 text-sm transition-all"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-full py-2 px-10 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/50 text-sm transition-all cursor-pointer"
+            onClick={onSearchClick}
+            readOnly
           />
           <SearchIcon className="absolute left-3 top-2.5 w-4 h-4 text-zinc-500 group-focus-within:text-purple-500 transition-colors" />
         </div>
@@ -83,6 +86,12 @@ const Navbar: React.FC<NavbarProps> = ({ user, onAuthClick, onUploadClick, onVie
             <div className="hidden sm:flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-full shadow-inner group hover:border-yellow-500/50 transition-colors cursor-help" title="Your Trippin' Points">
               <div className="w-4 h-4 bg-yellow-500 rounded-full flex items-center justify-center text-[10px] text-black font-black animate-pulse">★</div>
               <span className="text-white font-black text-xs tabular-nums">{user.points.toLocaleString()}</span>
+            </div>
+
+            {/* Credits Display */}
+            <div className="hidden sm:flex items-center gap-1 bg-zinc-900 border border-purple-500/30 px-3 py-1.5 rounded-full shadow-inner" title="AI Generation Credits">
+              <span className="text-xs">🎬</span>
+              <span className="text-purple-400 font-black text-xs tabular-nums">{user.credits}</span>
             </div>
 
             <button 

@@ -7,6 +7,7 @@ export interface User {
   isAdmin: boolean;
   hasAgreedToDisclaimer: boolean;
   points: number;
+  credits: number;
 }
 
 export interface Comment {

@@ -125,11 +125,50 @@ app.patch('/api/users/:id', authenticateUser, async (req: any, res: any) => {
   const { id } = req.params;
   if (req.user.id !== id) return res.status(403).json({ error: 'Forbidden' });
   try {
-    const { data: user, error } = await db.from('User').update(req.body).eq('id', id).select().single();
+    const { username, ...rest } = req.body;
+
+    if (username !== undefined) {
+      if (typeof username !== 'string' || !username.trim() || username.length < 3 || username.length > 20) {
+        return res.status(400).json({ error: 'Username must be 3-20 characters' });
+      }
+      if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+        return res.status(400).json({ error: 'Username can only contain letters, numbers, and underscores' });
+      }
+      const clean = username.trim();
+      // Case-insensitive uniqueness check
+      const { data: existing } = await db.from('User').select('id')
+        .ilike('username', clean).neq('id', id).maybeSingle();
+      if (existing) {
+        return res.status(409).json({ error: 'That username is already taken' });
+      }
+      rest.username = clean;
+
+      // Cascade username to all of the user's content
+      const userId = req.user.id;
+      await db.from('Video').update({ username: clean }).eq('userId', userId);
+      await db.from('Post').update({ username: clean }).eq('userId', userId);
+      await db.from('Comment').update({ username: clean }).eq('userId', userId);
+    }
+
+    const { data: user, error } = await db.from('User').update(rest).eq('id', id).select().single();
     if (error) throw error;
     res.json(user);
-  } catch {
+  } catch (err: any) {
+    if (err?.code === '23505') return res.status(409).json({ error: 'That username is already taken' });
+    console.error('User update failed:', err);
     res.status(500).json({ error: "Update failed" });
+  }
+});
+
+app.get('/api/users/check-username', async (req: any, res: any) => {
+  const { username } = req.query;
+  if (!username || typeof username !== 'string') return res.status(400).json({ available: false });
+  try {
+    const { data, error } = await db.from('User').select('id').ilike('username', username.trim()).maybeSingle();
+    if (error) throw error;
+    res.json({ available: !data });
+  } catch {
+    res.json({ available: false });
   }
 });
 
@@ -285,10 +324,16 @@ app.get('/api/friends/status/:userId', authenticateUser, async (req: any, res: a
 
 // --- Videos ---
 app.get('/api/videos', async (req: any, res: any) => {
+  const { before, limit: limitParam } = req.query;
+  const pageSize = Math.min(parseInt(limitParam as string) || 20, 50);
   try {
-    const { data: videos, error } = await db.from('Video').select('*, Comment(*)').order('createdAt', { ascending: false });
+    let query = db.from('Video').select('*, Comment(*)').order('createdAt', { ascending: false }).limit(pageSize + 1);
+    if (before) query = query.lt('createdAt', before);
+    const { data: videos, error } = await query;
     if (error) throw error;
-    res.json(videos || []);
+    const hasMore = (videos || []).length > pageSize;
+    const items = (videos || []).slice(0, pageSize);
+    res.json({ videos: items, hasMore });
   } catch (error: any) {
     console.error("GET /api/videos error:", error);
     res.status(500).json({ error: "DB Error", detail: error?.message || String(error) });
@@ -320,6 +365,38 @@ app.post('/api/videos', authenticateUser, upload.single('video'), async (req: an
       description: aiDescription, videoUrl: publicUrl, thumbnailUrl: '/uploads/default-thumb.jpg',
     }).select().single();
     if (insertError) throw insertError;
+    res.json(video);
+  } catch (error: any) {
+    console.error(error);
+    res.status(500).json({ error: error.message || 'Server Error' });
+  }
+});
+
+// --- AI-Generated Video Submission (URL-based, no file upload) ---
+app.post('/api/videos/from-url', authenticateUser, async (req: any, res: any) => {
+  try {
+    const { videoUrl, title, description } = req.body;
+    if (!videoUrl || !title) return res.status(400).json({ error: 'videoUrl and title are required' });
+
+    const userId = req.user.id;
+    const { data: userProfile } = await db.from('User').select('username').eq('id', userId).single();
+
+    const { data: video, error: insertError } = await db.from('Video').insert({
+      userId,
+      username: userProfile?.username || 'Anonymous',
+      title,
+      description: description || '',
+      videoUrl,
+      thumbnailUrl: '/uploads/default-thumb.jpg',
+    }).select().single();
+    if (insertError) throw insertError;
+
+    // Award 3 credits for posting
+    const { data: user } = await db.from('User').select('credits, points').eq('id', userId).single();
+    if (user) {
+      await db.from('User').update({ credits: (user.credits || 0) + 3, points: (user.points || 0) + 50 }).eq('id', userId);
+    }
+
     res.json(video);
   } catch (error: any) {
     console.error(error);
@@ -744,6 +821,132 @@ app.delete('/api/safety', authenticateUser, adminUser, async (req: any, res: any
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: "Failed to clear reports" });
+  }
+});
+
+// --- CREDITS SYSTEM ---
+
+// Earn credits for an action
+app.post('/api/credits/earn', authenticateUser, async (req: any, res: any) => {
+  const { action } = req.body;
+  const amounts: Record<string, number> = {
+    vote: 1,
+    comment: 2,
+    post: 3,
+    daily_login: 5,
+    referral: 10,
+  };
+  const amount = amounts[action];
+  if (!amount) return res.status(400).json({ error: 'Unknown action' });
+
+  try {
+    const { data: user, error: fetchErr } = await db.from('User').select('credits').eq('id', req.userId).single();
+    if (fetchErr || !user) return res.status(404).json({ error: 'User not found' });
+
+    const newCredits = (user.credits || 0) + amount;
+    const { error: updateErr } = await db.from('User').update({ credits: newCredits }).eq('id', req.userId);
+    if (updateErr) throw updateErr;
+
+    res.json({ credits: newCredits, earned: amount, action });
+  } catch (err) {
+    console.error('Credit earn error:', err);
+    res.status(500).json({ error: 'Failed to earn credits' });
+  }
+});
+
+// --- AI VIDEO GENERATION (Replicate) ---
+
+const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
+
+app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => {
+  const { prompt } = req.body;
+  if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+    return res.status(400).json({ error: 'Prompt is required' });
+  }
+  if (prompt.length > 500) {
+    return res.status(400).json({ error: 'Prompt must be 500 characters or less' });
+  }
+
+  if (!REPLICATE_API_TOKEN) {
+    return res.status(503).json({ error: 'AI video generation is not configured yet. Admin needs to set REPLICATE_API_TOKEN.' });
+  }
+
+  try {
+    // Check credits
+    const { data: user } = await db.from('User').select('credits').eq('id', req.userId).single();
+    if (!user || (user.credits || 0) < 5) {
+      return res.status(403).json({ error: 'Not enough credits. You need 5 credits to generate a video.' });
+    }
+
+    // Deduct credits
+    const newCredits = user.credits - 5;
+    await db.from('User').update({ credits: newCredits }).eq('id', req.userId);
+
+    // Create prediction via Replicate API
+    const response = await fetch('https://api.replicate.com/v1/predictions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${REPLICATE_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        // Luma Ray — text-to-video, fast and decent quality
+        version: 'luma/ray',
+        input: {
+          prompt: prompt.trim(),
+          duration: 5,
+          aspect_ratio: '9:16',
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      console.error('Replicate API error:', err);
+      // Refund credits on failure
+      await db.from('User').update({ credits: user.credits }).eq('id', req.userId);
+      return res.status(502).json({ error: 'Video generation service error. Credits refunded.' });
+    }
+
+    const prediction = await response.json();
+    res.json({ predictionId: prediction.id, status: prediction.status, credits: newCredits });
+  } catch (err) {
+    console.error('Generate video error:', err);
+    res.status(500).json({ error: 'Failed to start video generation' });
+  }
+});
+
+// Poll generation status
+app.get('/api/generate-video/:predictionId', authenticateUser, async (req: any, res: any) => {
+  const { predictionId } = req.params;
+  if (!REPLICATE_API_TOKEN) {
+    return res.status(503).json({ error: 'Not configured' });
+  }
+
+  try {
+    const response = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
+      headers: { 'Authorization': `Bearer ${REPLICATE_API_TOKEN}` },
+    });
+    const prediction = await response.json();
+
+    if (prediction.status === 'succeeded') {
+      res.json({
+        status: 'succeeded',
+        videoUrl: prediction.output,
+      });
+    } else if (prediction.status === 'failed' || prediction.status === 'canceled') {
+      // Refund credits
+      const { data: user } = await db.from('User').select('credits').eq('id', req.userId).single();
+      if (user) {
+        await db.from('User').update({ credits: (user.credits || 0) + 5 }).eq('id', req.userId);
+      }
+      res.json({ status: prediction.status, error: prediction.error, credits: (user?.credits || 0) + 5 });
+    } else {
+      res.json({ status: prediction.status });
+    }
+  } catch (err) {
+    console.error('Poll generation error:', err);
+    res.status(500).json({ error: 'Failed to check generation status' });
   }
 });
 

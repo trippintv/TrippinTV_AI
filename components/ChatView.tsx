@@ -4,6 +4,7 @@ import ReportModal from './ReportModal';
 import { supabase } from '../src/lib/supabaseClient';
 import { apiFetch } from '../src/lib/api';
 import { timeAgo } from '../src/lib/timeAgo';
+import { useToast } from './Toast';
 
 interface ChatViewProps {
   currentUser: User;
@@ -26,6 +27,7 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
   const [activeTab, setActiveTab] = useState<'recent' | 'explore'>('recent');
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
+  const { showToast } = useToast();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -148,7 +150,7 @@ const ChatView: React.FC<ChatViewProps> = ({ currentUser, allUsers }) => {
       });
       if (!res.ok) {
         const err = await res.json();
-        alert(`Safety Alert: ${err.error}`);
+        showToast(`Safety Alert: ${err.error}`, 'error');
       } else {
         setNewMessage('');
       }

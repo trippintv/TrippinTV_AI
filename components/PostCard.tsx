@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Post, User, Comment, ReactionType, ReactionSummary } from '../types';
 import { moderateContent } from '../services/geminiService';
 import ReportModal from './ReportModal';
+import { useToast } from './Toast';
 
 const REACTIONS: { type: ReactionType; emoji: string; label: string }[] = [
   { type: 'fire', emoji: '🔥', label: 'Fire' },
@@ -34,6 +35,7 @@ const PostCard: React.FC<PostCardProps> = ({
   const [showComments, setShowComments] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const { showToast } = useToast();
 
   const summary = post.reactionSummary || {};
   const userReactions = post.userReactions || [];
@@ -55,7 +57,7 @@ const PostCard: React.FC<PostCardProps> = ({
       setCommentText('');
       setReplyTo(null);
     } else {
-      alert(`Safety Alert: Comment blocked. ${result.reason}`);
+      showToast(`Safety Alert: Comment blocked. ${result.reason}`, 'error');
     }
     setIsAiProcessing(false);
   };

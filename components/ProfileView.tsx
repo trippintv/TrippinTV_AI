@@ -3,6 +3,8 @@ import React, { useRef, useState } from 'react';
 import { User, Video } from '../types';
 import { moderateContent } from '../services/geminiService';
 import ReportModal from './ReportModal';
+import { useToast } from './Toast';
+import { apiFetch } from '../src/lib/api';
 
 interface ProfileViewProps {
   user: User;
@@ -16,13 +18,18 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
   const [bioText, setBioText] = useState(user.bio || "I'm here to find the wildest trips on the internet. Follow me for daily madness! 🔥");
   const [isModerating, setIsModerating] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isEditingUsername, setIsEditingUsername] = useState(false);
+  const [usernameText, setUsernameText] = useState(user.username);
+  const [isCheckingUsername, setIsCheckingUsername] = useState(false);
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
   const totalTrips = videos.reduce((acc, v) => acc + v.trips, 0);
+  const { showToast } = useToast();
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 2 * 1024 * 1024) { // 2MB limit
-        alert("Image too big! Keep it under 2MB.");
+        showToast("Image too big! Keep it under 2MB.", 'error');
         return;
       }
 
@@ -41,9 +48,47 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
       onUpdateUser({ bio: bioText });
       setIsEditingBio(false);
     } else {
-      alert(`Safety Alert: Your bio was flagged. ${result.reason}`);
+      showToast(`Safety Alert: Your bio was flagged. ${result.reason}`, 'error');
     }
     setIsModerating(false);
+  };
+
+  const checkUsernameAvailability = async (name: string) => {
+    if (name.length < 3) { setUsernameAvailable(null); return; }
+    if (name.toLowerCase() === user.username.toLowerCase()) { setUsernameAvailable(true); return; }
+    setIsCheckingUsername(true);
+    setUsernameAvailable(null);
+    try {
+      const res = await apiFetch(`/api/users/check-username?username=${encodeURIComponent(name)}`);
+      const data = await res.json();
+      setUsernameAvailable(data.available);
+    } catch {
+      setUsernameAvailable(null);
+    }
+    setIsCheckingUsername(false);
+  };
+
+  const handleSaveUsername = async () => {
+    const name = usernameText.trim();
+    if (name.length < 3 || name.length > 20) {
+      showToast('Username must be 3-20 characters', 'error');
+      return;
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+      showToast('Username can only contain letters, numbers, and underscores', 'error');
+      return;
+    }
+    setIsCheckingUsername(true);
+    const res = await apiFetch(`/api/users/check-username?username=${encodeURIComponent(name)}`);
+    const data = await res.json();
+    setIsCheckingUsername(false);
+    if (!data.available && name.toLowerCase() !== user.username.toLowerCase()) {
+      showToast('That username is already taken', 'error');
+      return;
+    }
+    onUpdateUser({ username: name });
+    setIsEditingUsername(false);
+    showToast('Username updated!', 'success');
   };
 
   return (
@@ -79,7 +124,52 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
         
         <div className="flex-1 text-center md:text-left">
           <div className="flex flex-col md:flex-row md:items-center gap-4 mb-4">
-            <h2 className="bungee text-3xl md:text-4xl">@{user.username}</h2>
+            {isEditingUsername ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="bungee text-3xl md:text-4xl">@</span>
+                  <input
+                    type="text"
+                    value={usernameText}
+                    onChange={(e) => { setUsernameText(e.target.value); checkUsernameAvailability(e.target.value); }}
+                    className="bg-zinc-800 border border-purple-500 rounded-xl px-4 py-2 text-2xl md:text-3xl text-white font-black focus:outline-none focus:ring-1 focus:ring-purple-500 w-full max-w-xs"
+                    maxLength={20}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  {isCheckingUsername && <span className="text-xs text-zinc-500">Checking...</span>}
+                  {!isCheckingUsername && usernameAvailable === true && (
+                    <span className="text-xs text-green-400 font-bold">✓ Available</span>
+                  )}
+                  {!isCheckingUsername && usernameAvailable === false && (
+                    <span className="text-xs text-red-400 font-bold">✗ Already taken</span>
+                  )}
+                  <button
+                    onClick={handleSaveUsername}
+                    disabled={isCheckingUsername || !usernameText.trim() || usernameAvailable === false}
+                    className="bg-purple-600 hover:bg-purple-500 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => { setIsEditingUsername(false); setUsernameText(user.username); setUsernameAvailable(null); }}
+                    className="bg-zinc-700 hover:bg-zinc-600 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <h2 className="bungee text-3xl md:text-4xl flex items-center gap-3">@{user.username}
+                <button
+                  onClick={() => { setIsEditingUsername(true); setUsernameText(user.username); setUsernameAvailable(true); }}
+                  className="bg-zinc-800 hover:bg-zinc-700 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all hover:scale-105"
+                  title="Change username"
+                >
+                  ✏️ Edit
+                </button>
+              </h2>
+            )}
             <div className="flex gap-2 justify-center md:justify-start">
               <button 
                 onClick={() => fileInputRef.current?.click()}

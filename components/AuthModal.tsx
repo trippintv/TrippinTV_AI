@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { User } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
 import { apiFetch, API_BASE } from '../src/lib/api';
+import { useToast } from './Toast';
 
 interface AuthModalProps {
   onClose: () => void;
@@ -14,6 +15,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onAuthSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const { showToast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,12 +47,12 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onAuthSuccess }) => {
         if (data.session) {
           onAuthSuccess();
         } else {
-          alert('Account created! You can now log in.');
+          showToast('Account created! You can now log in.', 'success');
           setIsLogin(true);
         }
       }
     } catch (err: any) {
-      alert(err.message || 'Authentication failed');
+      showToast(err.message || 'Authentication failed', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -67,7 +69,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onAuthSuccess }) => {
       });
       if (error) throw error;
     } catch (err: any) {
-      alert(err.message || 'Google Login Failed');
+      showToast(err.message || 'Google Login Failed', 'error');
     } finally {
       setIsProcessing(false);
     }

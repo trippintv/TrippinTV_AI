@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Video, User, Comment, ReactionType, ReactionSummary } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
 import { apiFetch } from '../src/lib/api';
@@ -13,6 +13,10 @@ interface VideoFeedProps {
   onOpenProfile: (userId: string) => void;
   onShare: (video: Video) => void;
   user: User | null;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
+  onRefresh: () => void;
 }
 
 const VideoFeed: React.FC<VideoFeedProps> = ({
@@ -23,6 +27,10 @@ const VideoFeed: React.FC<VideoFeedProps> = ({
   onOpenProfile,
   onShare,
   user,
+  hasMore,
+  loadingMore,
+  onLoadMore,
+  onRefresh,
 }) => {
   const [showNotice, setShowNotice] = useState(true);
   const [tab, setTab] = useState<'foryou' | 'following'>('foryou');
@@ -30,6 +38,11 @@ const VideoFeed: React.FC<VideoFeedProps> = ({
   const [reactions, setReactions] = useState<Record<string, ReactionSummary>>({});
   const [userReactions, setUserReactions] = useState<Record<string, ReactionType[]>>({});
   const [loadingFollowing, setLoadingFollowing] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const touchStartY = useRef(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const loaderRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const dismissed = localStorage.getItem('trippin_vote_notice_dismissed');
@@ -97,10 +110,61 @@ const VideoFeed: React.FC<VideoFeedProps> = ({
     }
   }, [tab, user]);
 
+  // Infinite scroll via IntersectionObserver
+  useEffect(() => {
+    if (tab !== 'foryou') return;
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting && hasMore && !loadingMore) onLoadMore(); },
+      { threshold: 0.1 }
+    );
+    if (loaderRef.current) observer.observe(loaderRef.current);
+    return () => observer.disconnect();
+  }, [tab, hasMore, loadingMore, onLoadMore]);
+
+  // Pull-to-refresh (mobile touch handlers)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (window.scrollY === 0) touchStartY.current = e.touches[0].clientY;
+  };
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartY.current === 0) return;
+    const delta = e.touches[0].clientY - touchStartY.current;
+    if (delta > 0 && window.scrollY === 0) {
+      setPullDistance(Math.min(delta * 0.4, 80));
+    }
+  };
+  const handleTouchEnd = async () => {
+    if (pullDistance > 50) {
+      setIsRefreshing(true);
+      onRefresh();
+      await new Promise(r => setTimeout(r, 800));
+      setIsRefreshing(false);
+    }
+    setPullDistance(0);
+    touchStartY.current = 0;
+  };
+
   const displayed = tab === 'following' ? followingVideos : videos;
 
   return (
-    <div className="flex flex-col items-center gap-8 py-4">
+    <div
+      ref={scrollRef}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      className="flex flex-col items-center gap-8 py-4"
+    >
+      {/* Pull-to-refresh indicator */}
+      {(pullDistance > 0 || isRefreshing) && (
+        <div className="fixed top-16 left-0 right-0 flex justify-center z-50 pointer-events-none">
+          <div className={`bg-zinc-800 border border-zinc-700 rounded-full px-4 py-2 text-xs font-bold text-zinc-300 shadow-lg transition-all ${isRefreshing ? 'opacity-100' : ''}`}
+               style={{ transform: `translateY(${pullDistance}px)`, opacity: Math.min(pullDistance / 50, 1) }}>
+            {isRefreshing ? (
+              <span className="flex items-center gap-2"><div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" /> Refreshing...</span>
+            ) : pullDistance > 50 ? 'Release to refresh' : 'Pull to refresh'}
+          </div>
+        </div>
+      )}
+
       {/* Tab switcher */}
       {user && (
         <div className="w-full max-w-[420px] flex gap-2 bg-zinc-900/60 rounded-full p-1 border border-zinc-800">
@@ -164,6 +228,14 @@ const VideoFeed: React.FC<VideoFeedProps> = ({
           userReactions={userReactions[video.id] || []}
         />
       ))}
+
+      {/* Infinite scroll loader */}
+      {tab === 'foryou' && (
+        <div ref={loaderRef} className="py-4">
+          {loadingMore && <p className="text-zinc-500 text-xs">Loading more trips...</p>}
+          {!hasMore && videos.length > 0 && <p className="text-zinc-700 text-[10px] uppercase tracking-widest">You've seen it all</p>}
+        </div>
+      )}
 
       {tab === 'foryou' && videos.length === 0 && (
         <div className="text-center py-20">

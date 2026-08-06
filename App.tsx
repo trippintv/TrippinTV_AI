@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import Navbar from './components/Navbar';
 import VideoFeed from './components/VideoFeed';
@@ -15,9 +14,15 @@ import SafetyDashboard from './components/SafetyDashboard';
 import DisclaimerOverlay from './components/DisclaimerOverlay';
 import PostCard from './components/PostCard';
 import PostComposer from './components/PostComposer';
+import { SkeletonFeed } from './components/Skeleton';
+import SearchOverlay from './components/SearchOverlay';
+import VideoGenerator from './components/VideoGenerator';
 import { User, Video, Post, ViewType, Comment, Message, ReactionType, ReactionSummary } from './types';
 import { supabase } from './src/lib/supabaseClient';
 import { apiFetch } from './src/lib/api';
+import { useToast } from './components/Toast';
+import { haptic } from './src/lib/haptic';
+import { initializeAdMob, showBanner, hideBanner, showRewardedAd } from './src/lib/admob';
 
 const getToken = async (): Promise<string | null> => {
   const { data: { session } } = await supabase.auth.getSession();
@@ -40,6 +45,12 @@ const App: React.FC = () => {
   const [postUserReactions, setPostUserReactions] = useState<Record<string, ReactionType[]>>({});
   const [hasMorePosts, setHasMorePosts] = useState(true);
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [hasMoreVideos, setHasMoreVideos] = useState(true);
+  const [loadingMoreVideos, setLoadingMoreVideos] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [newVideosCount, setNewVideosCount] = useState(0);
+  const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
+  const { showToast } = useToast();
 
   // Supabase Realtime setup
   useEffect(() => {
@@ -70,6 +81,20 @@ const App: React.FC = () => {
     };
   }, [user, currentView]);
 
+  // Initialize AdMob on mount
+  useEffect(() => {
+    initializeAdMob();
+  }, []);
+
+  // Show/hide banner ad based on view
+  useEffect(() => {
+    if (currentView === 'feed' && user) {
+      showBanner();
+    } else {
+      hideBanner();
+    }
+  }, [currentView, user]);
+
   useEffect(() => {
     if (currentView === 'chat') {
       setUnreadChat(0);
@@ -86,13 +111,15 @@ const App: React.FC = () => {
           apiFetch('/api/posts')
         ]);
         const users = await usersRes.json();
-        const videos = await videosRes.json();
+        const videosData = await videosRes.json();
+        const videoList = videosData.videos || [];
         const postsData = await postsRes.json();
         const postList = postsData.posts || [];
         setAllUsers(users);
         setPosts(postList);
         setHasMorePosts(postsData.hasMore);
-        setVideos(videos);
+        setVideos(videoList);
+        setHasMoreVideos(videosData.hasMore);
 
         if (postList.length > 0) {
           const postResults = await Promise.all(
@@ -121,7 +148,7 @@ const App: React.FC = () => {
         const vMatch = path.match(/^\/v\/(.+)$/);
         const uMatch = path.match(/^\/u\/(.+)$/);
         if (vMatch) {
-          const vid = videos.find((v: Video) => v.id === vMatch[1]);
+          const vid = videoList.find((v: Video) => v.id === vMatch[1]);
           if (vid) { setCurrentView('feed'); /* scroll handled below */ }
         } else if (uMatch) {
           setViewUserId(uMatch[1]);
@@ -135,6 +162,22 @@ const App: React.FC = () => {
     };
     fetchData();
   }, []);
+
+  // Video polling — detect new videos every 60s
+  useEffect(() => {
+    if (videos.length === 0) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await apiFetch('/api/videos?limit=5');
+        const data = await res.json();
+        const latest = data.videos || [];
+        const existingIds = new Set(videos.map(v => v.id));
+        const newOnes = latest.filter((v: Video) => !existingIds.has(v.id));
+        if (newOnes.length > 0) setNewVideosCount(prev => prev + newOnes.length);
+      } catch {}
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [videos.length]);
 
   const loadMorePosts = async () => {
     if (loadingMorePosts || !hasMorePosts || posts.length === 0) return;
@@ -167,6 +210,22 @@ const App: React.FC = () => {
     }
   };
 
+  const loadMoreVideos = async () => {
+    if (loadingMoreVideos || !hasMoreVideos || videos.length === 0) return;
+    setLoadingMoreVideos(true);
+    try {
+      const last = videos[videos.length - 1];
+      const res = await apiFetch(`/api/videos?before=${last.createdAt}`);
+      const data = await res.json();
+      setVideos(prev => [...prev, ...(data.videos || [])]);
+      setHasMoreVideos(data.hasMore);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingMoreVideos(false);
+    }
+  };
+
   // Handle browser back/forward for deep links
   useEffect(() => {
     const onPop = () => {
@@ -189,6 +248,26 @@ const App: React.FC = () => {
     if (session) {
       await syncUserFromBackend(session.user.id);
       setIsAuthModalOpen(false);
+      // Daily login credit bonus
+      const lastLogin = localStorage.getItem('trippin_last_login');
+      const today = new Date().toDateString();
+      if (lastLogin !== today) {
+        localStorage.setItem('trippin_last_login', today);
+        try {
+          const cr = await apiFetch('/api/credits/earn', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ action: 'daily_login' }),
+          });
+          if (cr.ok) {
+            const { credits } = await cr.json();
+            setUser(prev => prev ? { ...prev, credits } : null);
+          }
+        } catch {}
+      }
     }
   };
 
@@ -260,7 +339,7 @@ const App: React.FC = () => {
       setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
       localStorage.setItem('trippin_user', JSON.stringify(updatedUser));
     } catch (err: any) {
-      alert(err.message);
+      showToast(err.message, 'error');
     }
   };
 
@@ -273,6 +352,7 @@ const App: React.FC = () => {
       setIsAuthModalOpen(true);
       return;
     }
+    haptic('medium');
 
     const video = videos.find(v => v.id === videoId);
     if (!video) return;
@@ -300,6 +380,21 @@ const App: React.FC = () => {
 
       // Update local points
       setUser(prev => prev ? { ...prev, points: Math.max(0, prev.points + (isVoting ? 10 : -10)) } : null);
+
+      // Earn credits for voting
+      if (isVoting) {
+        try {
+          const cr = await apiFetch('/api/credits/earn', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ action: 'vote' }),
+          });
+          if (cr.ok) {
+            const { credits } = await cr.json();
+            setUser(prev => prev ? { ...prev, credits } : null);
+          }
+        } catch {}
+      }
     } catch (err) {
       console.error("Vote failed", err);
     }
@@ -333,12 +428,13 @@ const App: React.FC = () => {
       // Update local points
       setUser(prev => prev ? { ...prev, points: (prev.points || 0) + 50 } : null);
     } catch (err: any) {
-      alert(err.message);
+      showToast(err.message, 'error');
     }
   };
 
   const handleComment = async (videoId: string, commentData: Partial<Comment>, parentId?: string) => {
     if (!user) { setIsAuthModalOpen(true); return; }
+    haptic('light');
     try {
       const token = await getToken();
       const res = await apiFetch('/api/comments', {
@@ -364,8 +460,17 @@ const App: React.FC = () => {
         v.id === videoId ? { ...v, comments: [...(v.comments || []), newComment] } : v
       ));
       setUser(prev => prev ? { ...prev, points: prev.points + 5 } : null);
+      // Earn credits for commenting
+      try {
+        const cr = await apiFetch('/api/credits/earn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ action: 'comment' }),
+        });
+        if (cr.ok) { const { credits } = await cr.json(); setUser(prev => prev ? { ...prev, credits } : null); }
+      } catch {}
     } catch (err: any) {
-      alert(err.message);
+      showToast(err.message, 'error');
     }
   };
 
@@ -389,8 +494,17 @@ const App: React.FC = () => {
       setPosts([post, ...posts]);
       setIsPostComposerOpen(false);
       setUser(prev => prev ? { ...prev, points: (prev.points || 0) + 10 } : null);
+      // Earn credits for posting
+      try {
+        const cr = await apiFetch('/api/credits/earn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ action: 'post' }),
+        });
+        if (cr.ok) { const { credits } = await cr.json(); setUser(prev => prev ? { ...prev, credits } : null); }
+      } catch {}
     } catch (err: any) {
-      alert(err.message);
+      showToast(err.message, 'error');
     }
   };
 
@@ -422,12 +536,13 @@ const App: React.FC = () => {
       ));
       setUser(prev => prev ? { ...prev, points: prev.points + 5 } : null);
     } catch (err: any) {
-      alert(err.message);
+      showToast(err.message, 'error');
     }
   };
 
   const handleReact = async (videoId: string, type: ReactionType) => {
     if (!user) { setIsAuthModalOpen(true); return; }
+    haptic('medium');
     try {
       const token = await getToken();
       const res = await apiFetch(`/api/videos/${videoId}/react`, {
@@ -492,9 +607,9 @@ const App: React.FC = () => {
         await navigator.share(shareData);
       } else if (navigator.clipboard) {
         await navigator.clipboard.writeText(url);
-        alert('Link copied to clipboard!');
+        showToast('Link copied to clipboard!', 'success');
       } else {
-        alert(`Share this link: ${url}`);
+        showToast(`Share this link: ${url}`, 'info');
       }
     } catch {
       // user cancelled share
@@ -503,8 +618,17 @@ const App: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="bungee text-purple-500 animate-pulse text-2xl">LOADING TRIPPIN' TV...</div>
+      <div className="min-h-screen bg-black text-white flex flex-col">
+        <div className="sticky top-0 z-50 bg-black/80 backdrop-blur-md border-b border-zinc-800 px-4 md:px-8 py-3 flex justify-between items-center">
+          <div className="skeleton w-10 h-10 rounded-full" />
+          <div className="flex gap-3">
+            <div className="skeleton h-8 w-20 rounded-full" />
+            <div className="skeleton h-8 w-20 rounded-full" />
+          </div>
+        </div>
+        <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-4">
+          <SkeletonFeed />
+        </main>
       </div>
     );
   }
@@ -519,20 +643,79 @@ const App: React.FC = () => {
           currentView={currentView as any}
           onLogout={handleLogout}
           unreadChat={unreadChat}
+          onSearchClick={() => setIsSearchOpen(true)}
           notificationBell={user ? <NotificationBell onOpen={() => { setCurrentView('notifications'); window.history.pushState({}, '', '/notifications'); }} onNavigate={(view, userId) => { setCurrentView(view as any); if (userId) setViewUserId(userId); window.history.pushState({}, '', userId ? `/u/${userId}` : `/${view}`); }} /> : undefined}
         />
 
-        <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-4 mb-20 md:mb-0">
+        {isSearchOpen && (
+          <SearchOverlay
+            onClose={() => setIsSearchOpen(false)}
+            onOpenProfile={handleOpenProfile}
+            onSelectVideo={(id) => { setCurrentView('feed'); setIsSearchOpen(false); }}
+            allUsers={allUsers}
+          />
+        )}
+
+        <main key={currentView} className="flex-1 w-full max-w-7xl mx-auto px-4 py-4 mb-20 md:mb-0 view-enter">
           {currentView === 'feed' && (
-            <VideoFeed 
-              videos={videos} 
-              onVote={handleVote} 
-              onComment={handleComment}
-              onReact={handleReact}
-              onOpenProfile={handleOpenProfile}
-              onShare={handleShare}
-              user={user}
-            />
+            <>
+              {newVideosCount > 0 && (
+                <button
+                  onClick={async () => { try { const res = await apiFetch('/api/videos'); const data = await res.json(); setVideos(data.videos || []); setHasMoreVideos(data.hasMore); } catch {} setNewVideosCount(0); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  className="w-full mb-4 py-2 bg-purple-600/20 border border-purple-500/30 rounded-full text-purple-400 text-xs font-bold hover:bg-purple-600/30 transition-all animate-banner-slide-down"
+                >
+                  {newVideosCount} new video{newVideosCount > 1 ? 's' : ''} — tap to refresh
+                </button>
+              )}
+              {user && (
+                <div className="flex gap-3 mb-4">
+                  <button
+                    onClick={() => setIsGeneratorOpen(true)}
+                    className="flex-1 py-3 bg-gradient-to-r from-purple-600/20 to-pink-600/20 border border-purple-500/30 rounded-2xl text-sm font-bold text-white hover:from-purple-600/30 hover:to-pink-600/30 transition-all flex items-center justify-center gap-2"
+                  >
+                    <span className="text-lg">🎬</span>
+                    Generate with AI
+                    <span className="text-[10px] text-purple-400 bg-purple-500/10 rounded-full px-2 py-0.5">{user.credits} credits</span>
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const earned = await showRewardedAd();
+                      if (earned) {
+                        const token = await getToken();
+                        if (token) {
+                          const cr = await apiFetch('/api/credits/earn', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ action: 'daily_login' }),
+                          });
+                          if (cr.ok) {
+                            const { credits } = await cr.json();
+                            setUser(prev => prev ? { ...prev, credits } : null);
+                            showToast('+5 credits earned!', 'success');
+                          }
+                        }
+                      }
+                    }}
+                    className="py-3 px-4 bg-green-600/20 border border-green-500/30 rounded-2xl text-sm font-bold text-green-400 hover:bg-green-600/30 transition-all flex items-center justify-center gap-1 whitespace-nowrap"
+                  >
+                    🎬 +5
+                  </button>
+                </div>
+              )}
+              <VideoFeed 
+                videos={videos} 
+                onVote={handleVote} 
+                onComment={handleComment}
+                onReact={handleReact}
+                onOpenProfile={handleOpenProfile}
+                onShare={handleShare}
+                user={user}
+                hasMore={hasMoreVideos}
+                loadingMore={loadingMoreVideos}
+                onLoadMore={loadMoreVideos}
+                onRefresh={() => { setIsLoading(true); window.location.reload(); }}
+              />
+            </>
           )}
           {currentView === 'leaderboard' && <Leaderboard videos={videos} />}
           {currentView === 'posts' && (
@@ -631,6 +814,23 @@ const App: React.FC = () => {
             onClose={() => setIsPostComposerOpen(false)}
             onPost={handleAddPost}
             user={user}
+          />
+        )}
+
+        {/* AI Video Generator */}
+        {isGeneratorOpen && user && (
+          <VideoGenerator
+            user={user}
+            onClose={() => setIsGeneratorOpen(false)}
+            onVideoCreated={(video) => {
+              setVideos([video, ...videos]);
+              user.credits -= 5;
+              setIsGeneratorOpen(false);
+              setCurrentView('feed');
+              window.history.pushState({}, '', '/');
+              showToast('AI video generated and submitted!', 'success');
+            }}
+            getToken={getToken}
           />
         )}
 
