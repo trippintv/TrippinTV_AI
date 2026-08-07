@@ -952,9 +952,100 @@ app.get('/api/generate-video/:predictionId', authenticateUser, async (req: any, 
   }
 });
 
+// --- 3.5 LEGAL PAGES ---
+
+const LEGAL_STYLES = `
+  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#09090b;color:#e4e4e7;margin:0;line-height:1.6}
+  .wrap{max-width:760px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:28px;margin:0 0 8px;color:#fff}
+  h2{font-size:20px;margin:36px 0 8px;color:#c084fc}
+  p{margin:8px 0;color:#a1a1aa}
+  .muted{color:#71717a;font-size:13px}
+  a{color:#a78bfa}
+  .tag{display:inline-block;background:#18181b;border:1px solid #27272a;border-radius:8px;padding:2px 10px;font-size:12px;color:#71717a}
+  `;
+
+const PRIVACY_POLICY_HTML = `
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy Policy — Trippin' TV</title><style>${LEGAL_STYLES}</style></head>
+<body><div class="wrap">
+<h1>Privacy Policy</h1>
+<p class="muted">Last updated: August 6, 2026</p>
+
+<h2>1. Overview</h2>
+<p>Trippin' TV ("we", "us") operates the Trippin' TV mobile application ("the App"). This Privacy Policy explains what information we collect, how we use it, and the choices you have. By using the App you agree to the practices described here.</p>
+
+<h2>2. Information We Collect</h2>
+<p><b>Account information.</b> When you create an account we collect your name, email address, and profile picture.</p>
+<p><b>Content you upload.</b> Videos, posts, comments, messages, reactions, and any other content you submit through the App.</p>
+<p><b>Usage data.</b> Information about how you interact with the App, including votes, credits earned and spent, and device identifiers where needed for features to function.</p>
+<p><b>Advertising data.</b> The App displays advertising provided by Google AdMob. Google may collect and process identifiers and other data in accordance with its own privacy policy to serve and measure ads, and may serve personalised ads where permitted by applicable law and your choices. See <a href="https://policies.google.com/privacy" rel="noopener">https://policies.google.com/privacy</a>.</p>
+
+<h2>3. How We Use Information</h2>
+<p>We use the information we collect to operate the App, provide features such as the AI video generator and credits, personalise your experience, moderate content, respond to support requests, detect and prevent abuse, and display advertising.</p>
+
+<h2>4. Sharing of Information</h2>
+<p>We do not sell your personal information. We share information only: (a) with service providers who help us operate the App (such as hosting, storage, AI generation and advertising providers), (b) when required by law, or (c) with your consent.</p>
+
+<h2>5. Children</h2>
+<p>The App is not directed to children under the age of 13 (or the applicable minimum age in your jurisdiction), and we do not knowingly collect personal information from them. If you believe a child has provided us personal information, contact us and we will delete it.</p>
+
+<h2>6. Your Choices</h2>
+<p>You may edit or delete content you post, and you may delete your account at any time. You can opt out of personalised advertising through your device settings and Google's ad settings at <a href="https://adssettings.google.com" rel="noopener">https://adssettings.google.com</a>.</p>
+
+<h2>7. Data Retention and Security</h2>
+<p>We retain information for as long as your account is active or as needed to provide the service and comply with legal obligations. We use reasonable technical safeguards to protect your data, but no method of transmission or storage is completely secure.</p>
+
+<h2>8. Contact</h2>
+<p>If you have questions about this Privacy Policy, contact us at: <b>privacy@trippintv.tv</b></p>
+</div></body></html>`;
+
+const TERMS_HTML = `
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Terms of Service — Trippin' TV</title><style>${LEGAL_STYLES}</style></head>
+<body><div class="wrap">
+<h1>Terms of Service</h1>
+<p class="muted">Last updated: August 6, 2026</p>
+
+<h2>1. Acceptance</h2>
+<p>By creating an account or using Trippin' TV you agree to these Terms. If you do not agree, do not use the App.</p>
+
+<h2>2. Eligibility</h2>
+<p>You must be at least 13 years old (or the applicable minimum age in your country) to use the App.</p>
+
+<h2>3. Acceptable Use</h2>
+<p>You agree not to: harass or bully others; post dangerous, unlawful, or non-consensual content; upload content that infringes the rights of others; cheat, manipulate, or create multiple accounts in connection with prizes or the credits system; or otherwise misuse the App.</p>
+
+<h2>4. Content You Post</h2>
+<p>You retain ownership of content you upload. You grant us a worldwide, non-exclusive licence to host, display, and distribute your content in connection with the App. You are responsible for the content you upload and agree to hold Trippin' TV harmless for any legal action arising from your posts.</p>
+
+<h2>5. Prizes and Credits</h2>
+<p>Credits and rewards are subject to our rules. One account per person. Cheating or manipulation may result in a ban and forfeiture of rewards. Prizes are real, and eligibility may be subject to additional rules.</p>
+
+<h2>6. Termination</h2>
+<p>We may suspend or terminate your account at any time if you violate these Terms or for any other reason, with or without notice.</p>
+
+<h2>7. Disclaimers</h2>
+<p>The App is provided "as is" without warranties of any kind. To the maximum extent permitted by law, we disclaim all liability for damages arising from your use of the App.</p>
+
+<h2>8. Changes and Contact</h2>
+<p>We may update these Terms from time to time. Continued use after changes constitutes acceptance. Questions: <b>privacy@trippintv.tv</b></p>
+</div></body></html>`;
+
 // --- 4. START ---
 const distPath = path.resolve(process.cwd(), 'dist');
 app.use(express.static(distPath));
+
+app.get('/privacy', (_req, res) => {
+  res.type('html').send(PRIVACY_POLICY_HTML);
+});
+
+app.get('/terms', (_req, res) => {
+  res.type('html').send(TERMS_HTML);
+});
+
 app.get('/{*splat}', (req, res) => {
   if (!req.path.startsWith('/api')) {
     res.sendFile(path.join(distPath, 'index.html'));

@@ -6,7 +6,7 @@ const isNative = () => Capacitor.isNativePlatform();
 export async function initializeAdMob() {
   if (!isNative()) return;
   try {
-    await AdMob.initialize({ initializeForTesting: true });
+    await AdMob.initialize({ initializeForTesting: false });
   } catch (err) {
     console.warn('AdMob init failed:', err);
   }
@@ -24,7 +24,7 @@ export async function showBanner() {
       adSize: BannerAdSize.ADAPTIVE_BANNER,
       position: BannerAdPosition.BOTTOM_CENTER,
       margin: 0,
-      isTesting: true,
+      isTesting: false,
     };
     await AdMob.showBanner(options);
     bannerShown = true;
@@ -76,7 +76,7 @@ export async function showRewardedAd(): Promise<boolean> {
 
       await AdMob.prepareRewardVideoAd({
         adId: getAdUnitId('rewarded'),
-        isTesting: true,
+        isTesting: false,
       });
       await AdMob.showRewardVideoAd();
     } catch (err) {

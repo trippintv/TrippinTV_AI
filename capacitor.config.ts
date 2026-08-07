@@ -9,7 +9,7 @@ const config: CapacitorConfig = {
   },
   android: {
     allowMixedContent: true,
-    webContentsDebuggingEnabled: true,
+    webContentsDebuggingEnabled: false,
   },
   plugins: {
     AdMob: {
@@ -26,7 +26,7 @@ const config: CapacitorConfig = {
       //   adUnitId: 'ca-app-pub-XXXXXXXXXXXXXXXX/ZZZZZZZZZZ',
       //   rewardedAdUnitId: 'ca-app-pub-XXXXXXXXXXXXXXXX/WWWWWWWWWW',
       // },
-      testing: true, // Set to false in production
+      testing: false, // Set to false in production
     },
   },
 };
