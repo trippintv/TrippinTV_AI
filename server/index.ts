@@ -191,6 +191,38 @@ app.get('/api/users/check-username', async (req: any, res: any) => {
   }
 });
 
+// --- Account deletion (Google Play requirement) ---
+app.delete('/api/users/me', authenticateUser, async (req: any, res: any) => {
+  const userId = req.user.id;
+  try {
+    // Remove content referencing the user (children first, then User, then auth).
+    await Promise.all([
+      db.from('Reaction').delete().eq('userId', userId),
+      db.from('ReactionOnPost').delete().eq('userId', userId),
+      db.from('Comment').delete().eq('userId', userId),
+      db.from('Message').delete().or(`senderId.eq.${userId},receiverId.eq.${userId}`),
+      db.from('Follow').delete().or(`followerId.eq.${userId},followingId.eq.${userId}`),
+      db.from('Friendship').delete().or(`userAId.eq.${userId},userBId.eq.${userId}`),
+      db.from('FriendRequest').delete().or(`senderId.eq.${userId},receiverId.eq.${userId}`),
+      db.from('Notification').delete().or(`recipientId.eq.${userId},actorId.eq.${userId}`),
+      db.from('BlockedUser').delete().or(`blockerId.eq.${userId},blockedId.eq.${userId}`),
+    ]);
+    await db.from('Video').delete().eq('userId', userId);
+    await db.from('Post').delete().eq('userId', userId);
+
+    const { error: delErr } = await db.from('User').delete().eq('id', userId);
+    if (delErr) throw delErr;
+
+    const { error: authErr } = await db.auth.admin.deleteUser(userId);
+    if (authErr) throw authErr;
+
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error('Account deletion failed:', error);
+    res.status(500).json({ error: error?.message || 'Account deletion failed' });
+  }
+});
+
 // --- Friends ---
 const areFriends = async (a: string, b: string): Promise<boolean> => {
   const { count } = await db.from('Friendship').select('*', { count: 'exact', head: true })

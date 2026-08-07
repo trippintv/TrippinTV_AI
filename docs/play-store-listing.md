@@ -93,9 +93,9 @@ Recommendation: run the questionnaire with these answers:
 
 ## 7. Required: Account deletion / data deletion
 
-Play requires a working account-deletion option. Recommended implementation:
-- Add a "Delete Account" button in Profile → Settings that calls `DELETE /api/users/:id` (server removes User + cascades content), then signs out.
-- Fallback: email `privacy@trippintv.tv` from the registered address.
+Play requires a working account-deletion option. Implemented:
+- **Done**: "Delete Account" button in Profile → removes all user content (videos, posts, comments, messages, reactions, follows, friends, notifications, blocks) from the DB, then deletes the Supabase auth user. Server: `DELETE /api/users/me`.
+- Fallback for support: email `privacy@trippintv.tv` from the registered address.
 
 ## 8. Ads declaration
 
@@ -106,7 +106,7 @@ Play requires a working account-deletion option. Recommended implementation:
 ## 9. Pre-launch checklist
 
 - [ ] Add billing to Replicate (AI video generator — currently returns 402)
-- [ ] Add account deletion flow (§7)
+- [x] Add account deletion flow (§7)
 - [ ] Upload signed AAB from CI (android app-release-aab artifact)
 - [ ] Run pre-launch report in Play Console on the AAB
 - [ ] Fill data safety form (§6)

@@ -5,6 +5,7 @@ import { moderateContent } from '../services/geminiService';
 import ReportModal from './ReportModal';
 import { useToast } from './Toast';
 import { apiFetch } from '../src/lib/api';
+import { supabase } from '../src/lib/supabaseClient';
 
 interface ProfileViewProps {
   user: User;
@@ -89,6 +90,25 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
     onUpdateUser({ username: name });
     setIsEditingUsername(false);
     showToast('Username updated!', 'success');
+  };
+
+  const handleDeleteAccount = async () => {
+    const confirmed = window.confirm(
+      'Delete your account permanently? All your videos, posts, messages, points, and credits will be removed. This cannot be undone.'
+    );
+    if (!confirmed) return;
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      const res = await fetch('/api/users/me', {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Delete failed');
+      await supabase.auth.signOut();
+      window.location.reload();
+    } catch {
+      showToast("Couldn't delete account. Try again or email privacy@trippintv.tv", 'error');
+    }
   };
 
   return (
@@ -182,6 +202,14 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
                 className="bg-red-900/20 hover:bg-red-900/40 text-red-500 border border-red-500/30 px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all hover:scale-105"
               >
                 Report
+              </button>
+            </div>
+            <div className="mt-6 pt-4 border-t border-zinc-800/60">
+              <button 
+                onClick={handleDeleteAccount}
+                className="text-[11px] font-bold uppercase tracking-widest text-zinc-600 hover:text-red-500 transition-colors"
+              >
+                Delete Account
               </button>
             </div>
           </div>
