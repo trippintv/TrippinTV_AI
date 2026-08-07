@@ -47,6 +47,7 @@ export interface Video {
   comments: Comment[];
   createdAt: string;
   hasVoted?: boolean;
+  isAiGenerated?: boolean;
 }
 
 export interface Message {

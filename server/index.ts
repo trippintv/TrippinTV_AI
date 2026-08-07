@@ -47,6 +47,25 @@ const adminUser = async (req: any, res: any, next: any) => {
   }
 };
 
+// Optional auth: resolves the user if a valid token is present, otherwise continues as anonymous.
+const optionalUser = async (req: any, res: any, next: any) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+      const token = authHeader.split(' ')[1];
+      const { data: { user }, error } = await db.auth.getUser(token);
+      if (!error && user) req.user = user;
+    }
+  } catch { /* ignore */ }
+  next();
+};
+
+// Helper: fetch the IDs of users blocked by the given user.
+const getBlockedIds = async (userId: string): Promise<string[]> => {
+  const { data } = await db.from('BlockedUser').select('blockedId').eq('blockerId', userId);
+  return (data || []).map((b: any) => b.blockedId);
+};
+
 const genAI = new GoogleGenAI({ apiKey: process.env.VITE_GEMINI_API_KEY || '' });
 
 const storage = multer.memoryStorage();
@@ -292,15 +311,62 @@ app.get('/api/friends', authenticateUser, async (req: any, res: any) => {
 });
 
 app.get('/api/users/search', authenticateUser, async (req: any, res: any) => {
-  const q = (req.query.q || '').toString().trim();
+  const { q } = req.query;
   if (!q) return res.json([]);
   try {
-    const { data: users } = await db.from('User').select('*')
+    const blocked = await getBlockedIds(req.user.id);
+    let { data: users } = await db.from('User').select('*')
       .ilike('username', `%${q}%`).neq('id', req.user.id).limit(20);
+    if (blocked.length > 0) users = (users || []).filter((u: any) => !blocked.includes(u.id));
     res.json(users || []);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+// --- Blocking (Google Play UGC policy) ---
+
+app.get('/api/blocked', authenticateUser, async (req: any, res: any) => {
+  try {
+    const { data } = await db.from('BlockedUser')
+      .select('blockedId, blocked:User!BlockedUser_blockedId_fkey(id, username, avatar)')
+      .eq('blockerId', req.user.id)
+      .order('createdAt', { ascending: false });
+    res.json((data || []).map((b: any) => b.blocked));
+  } catch (error: any) {
+    console.error(error);
+    res.status(500).json({ error: error?.message || 'Failed to list blocked users' });
+  }
+});
+
+app.post('/api/block/:userId', authenticateUser, async (req: any, res: any) => {
+  const { userId: blockedId } = req.params;
+  if (blockedId === req.user.id) return res.status(400).json({ error: "You can't block yourself" });
+  try {
+    const { error } = await db.from('BlockedUser').insert({ blockerId: req.user.id, blockedId });
+    if (error) throw error;
+    // Remove any existing friendship between the two users when blocked.
+    await db.from('Friendship').delete().or(`and(userAId.eq.${req.user.id},userBId.eq.${blockedId}),and(userAId.eq.${blockedId},userBId.eq.${req.user.id})`);
+    await db.from('FriendRequest').delete().or(`and(senderId.eq.${req.user.id},receiverId.eq.${blockedId}),and(senderId.eq.${blockedId},receiverId.eq.${req.user.id})`);
+    await db.from('Follow').delete().or(`and(followerId.eq.${req.user.id},followingId.eq.${blockedId}),and(followerId.eq.${blockedId},followingId.eq.${req.user.id})`);
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error(error);
+    res.status(500).json({ error: error?.message || 'Failed to block user' });
+  }
+});
+
+app.delete('/api/block/:userId', authenticateUser, async (req: any, res: any) => {
+  const { userId: blockedId } = req.params;
+  try {
+    const { error } = await db.from('BlockedUser').delete()
+      .eq('blockerId', req.user.id).eq('blockedId', blockedId);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error(error);
+    res.status(500).json({ error: error?.message || 'Failed to unblock user' });
   }
 });
 
@@ -323,14 +389,23 @@ app.get('/api/friends/status/:userId', authenticateUser, async (req: any, res: a
 });
 
 // --- Videos ---
-app.get('/api/videos', async (req: any, res: any) => {
+app.get('/api/videos', optionalUser, async (req: any, res: any) => {
   const { before, limit: limitParam } = req.query;
   const pageSize = Math.min(parseInt(limitParam as string) || 20, 50);
   try {
     let query = db.from('Video').select('*, Comment(*)').order('createdAt', { ascending: false }).limit(pageSize + 1);
     if (before) query = query.lt('createdAt', before);
-    const { data: videos, error } = await query;
+    let { data: videos, error } = await query;
     if (error) throw error;
+
+    // Hide videos posted by users the requester has blocked.
+    if (req.user?.id) {
+      const blocked = await getBlockedIds(req.user.id);
+      if (blocked.length > 0) {
+        videos = (videos || []).filter((v: any) => !blocked.includes(v.userId));
+      }
+    }
+
     const hasMore = (videos || []).length > pageSize;
     const items = (videos || []).slice(0, pageSize);
     res.json({ videos: items, hasMore });
@@ -388,6 +463,7 @@ app.post('/api/videos/from-url', authenticateUser, async (req: any, res: any) =>
       description: description || '',
       videoUrl,
       thumbnailUrl: '/uploads/default-thumb.jpg',
+      isAiGenerated: true,
     }).select().single();
     if (insertError) throw insertError;
 
@@ -663,6 +739,12 @@ app.post('/api/messages', authenticateUser, async (req: any, res: any) => {
   const senderId = req.user.id;
   try {
     if (!(await areFriends(senderId, receiverId))) return res.status(403).json({ error: 'You can only message friends' });
+    // Blocked users can't message each other in either direction.
+    const [{ data: b1 }, { data: b2 }] = await Promise.all([
+      db.from('BlockedUser').select('id').eq('blockerId', senderId).eq('blockedId', receiverId).maybeSingle(),
+      db.from('BlockedUser').select('id').eq('blockerId', receiverId).eq('blockedId', senderId).maybeSingle(),
+    ]);
+    if (b1 || b2) return res.status(403).json({ error: 'Messaging is unavailable for this user' });
     const { data: message, error } = await db.from('Message').insert({ senderId, receiverId, text }).select().single();
     if (error) throw error;
     const { data: sender } = await db.from('User').select('username').eq('id', senderId).single();
@@ -681,11 +763,13 @@ app.get('/api/conversations/:id', authenticateUser, async (req: any, res: any) =
       .or(`senderId.eq.${id},receiverId.eq.${id}`).order('createdAt', { ascending: false });
     const seen = new Set<string>();
     const conversations = [];
+    const blocked = await getBlockedIds(id);
     for (const msg of messages || []) {
       const sender = (msg as any).sender;
       const receiver = (msg as any).receiver;
       const partner = msg.senderId === id ? receiver : sender;
       if (!partner || seen.has(partner.id)) continue;
+      if (blocked.includes(partner.id)) continue;
       seen.add(partner.id);
       const { sender: _s, receiver: _r, ...lastMessage } = msg as any;
       conversations.push({ user: partner, lastMessage });
@@ -984,20 +1068,24 @@ const PRIVACY_POLICY_HTML = `
 
 <h2>3. How We Use Information</h2>
 <p>We use the information we collect to operate the App, provide features such as the AI video generator and credits, personalise your experience, moderate content, respond to support requests, detect and prevent abuse, and display advertising.</p>
+<p><b>AI-generated content.</b> The App offers an AI video generator. Videos created with it are labelled as "AI-generated" so you can tell them apart from user-recorded content. AI models used to generate this content are provided by third parties.</p>
 
 <h2>4. Sharing of Information</h2>
 <p>We do not sell your personal information. We share information only: (a) with service providers who help us operate the App (such as hosting, storage, AI generation and advertising providers), (b) when required by law, or (c) with your consent.</p>
 
-<h2>5. Children</h2>
+<h2>5. User Content and Safety</h2>
+<p>Content you post is visible to other users. We use automated moderation and manual review to keep the App safe, and we provide in-app tools for you to report content and block other users. When you report content, the report and any relevant context are shared with our moderation team. If your content or account is banned, we may retain the associated information to prevent further abuse.</p>
+
+<h2>6. Children</h2>
 <p>The App is not directed to children under the age of 13 (or the applicable minimum age in your jurisdiction), and we do not knowingly collect personal information from them. If you believe a child has provided us personal information, contact us and we will delete it.</p>
 
-<h2>6. Your Choices</h2>
-<p>You may edit or delete content you post, and you may delete your account at any time. You can opt out of personalised advertising through your device settings and Google's ad settings at <a href="https://adssettings.google.com" rel="noopener">https://adssettings.google.com</a>.</p>
+<h2>7. Your Choices</h2>
+<p>You may edit or delete content you post, block or unblock other users, and you may delete your account at any time. You can opt out of personalised advertising through your device settings and Google's ad settings at <a href="https://adssettings.google.com" rel="noopener">https://adssettings.google.com</a>.</p>
 
-<h2>7. Data Retention and Security</h2>
+<h2>8. Data Retention and Security</h2>
 <p>We retain information for as long as your account is active or as needed to provide the service and comply with legal obligations. We use reasonable technical safeguards to protect your data, but no method of transmission or storage is completely secure.</p>
 
-<h2>8. Contact</h2>
+<h2>9. Contact</h2>
 <p>If you have questions about this Privacy Policy, contact us at: <b>privacy@trippintv.tv</b></p>
 </div></body></html>`;
 
@@ -1016,21 +1104,24 @@ const TERMS_HTML = `
 <p>You must be at least 13 years old (or the applicable minimum age in your country) to use the App.</p>
 
 <h2>3. Acceptable Use</h2>
-<p>You agree not to: harass or bully others; post dangerous, unlawful, or non-consensual content; upload content that infringes the rights of others; cheat, manipulate, or create multiple accounts in connection with prizes or the credits system; or otherwise misuse the App.</p>
+<p>You agree not to: harass or bully others; post dangerous, unlawful, or non-consensual content; upload content that infringes the rights of others; cheat, manipulate, or create multiple accounts in connection with prizes or the credits system; or otherwise misuse the App. You must be at least 13 years old to use the App.</p>
 
 <h2>4. Content You Post</h2>
-<p>You retain ownership of content you upload. You grant us a worldwide, non-exclusive licence to host, display, and distribute your content in connection with the App. You are responsible for the content you upload and agree to hold Trippin' TV harmless for any legal action arising from your posts.</p>
+<p>You retain ownership of content you upload. You grant us a worldwide, non-exclusive licence to host, display, and distribute your content in connection with the App. You are responsible for the content you upload and agree to hold Trippin' TV harmless for any legal action arising from your posts. Videos created with our AI generator are labelled as "AI-generated".</p>
 
-<h2>5. Prizes and Credits</h2>
+<h2>5. Reporting and Blocking</h2>
+<p>You can report content that you believe violates these Terms using the in-app report tools, and you can block any user from your profile page. We may remove content and suspend or ban accounts that violate these Terms. Automated moderation may filter content before posting.</p>
+
+<h2>6. Prizes and Credits</h2>
 <p>Credits and rewards are subject to our rules. One account per person. Cheating or manipulation may result in a ban and forfeiture of rewards. Prizes are real, and eligibility may be subject to additional rules.</p>
 
-<h2>6. Termination</h2>
+<h2>7. Termination</h2>
 <p>We may suspend or terminate your account at any time if you violate these Terms or for any other reason, with or without notice.</p>
 
-<h2>7. Disclaimers</h2>
+<h2>8. Disclaimers</h2>
 <p>The App is provided "as is" without warranties of any kind. To the maximum extent permitted by law, we disclaim all liability for damages arising from your use of the App.</p>
 
-<h2>8. Changes and Contact</h2>
+<h2>9. Changes and Contact</h2>
 <p>We may update these Terms from time to time. Continued use after changes constitutes acceptance. Questions: <b>privacy@trippintv.tv</b></p>
 </div></body></html>`;
 

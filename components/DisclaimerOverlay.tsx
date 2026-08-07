@@ -19,22 +19,34 @@ const DisclaimerOverlay: React.FC<DisclaimerOverlayProps> = ({ onAgree }) => {
         <div className="text-zinc-400 space-y-4 text-sm mb-8 text-left bg-zinc-800/50 p-6 rounded-2xl border border-zinc-700">
           <p className="flex gap-3">
             <span className="text-purple-500 font-black">1.</span>
-            No harassment or bullying. We're here for laughs, not hate.
+            You must be 13 or older to use Trippin' TV.
           </p>
           <p className="flex gap-3">
             <span className="text-purple-500 font-black">2.</span>
-            No dangerous stunts that result in serious injury or death.
+            No harassment, bullying, hate, or targeting of others.
           </p>
           <p className="flex gap-3">
             <span className="text-purple-500 font-black">3.</span>
-            Privacy matters. Do not upload sensitive or non-consensual content.
+            No dangerous stunts that result in serious injury or death.
           </p>
           <p className="flex gap-3">
             <span className="text-purple-500 font-black">4.</span>
+            Privacy matters. Do not upload sensitive or non-consensual content.
+          </p>
+          <p className="flex gap-3">
+            <span className="text-purple-500 font-black">5.</span>
+            Videos marked "AI-generated" were created using our AI tools.
+          </p>
+          <p className="flex gap-3">
+            <span className="text-purple-500 font-black">6.</span>
             The prizes are real. One account per person. Any cheating = Ban.
           </p>
+          <p className="flex gap-3">
+            <span className="text-purple-500 font-black">7.</span>
+            See something bad? Report it from any post, video, or profile. You can also block any user.
+          </p>
           <p className="mt-4 italic text-zinc-500 text-xs">
-            By clicking agree, you acknowledge that you are responsible for the content you upload and hold Trippin' TV harmless for any legal actions arising from your posts.
+            By clicking agree, you acknowledge that you are responsible for the content you upload, that you are old enough to use the app, and you hold Trippin' TV harmless for any legal actions arising from your posts. See our <a href="https://trippintv-ai.onrender.com/terms" target="_blank" rel="noopener" className="text-purple-400 underline">Terms of Service</a> and <a href="https://trippintv-ai.onrender.com/privacy" target="_blank" rel="noopener" className="text-purple-400 underline">Privacy Policy</a>.
           </p>
         </div>
 

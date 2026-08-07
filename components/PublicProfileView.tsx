@@ -28,6 +28,7 @@ const PublicProfileView: React.FC<PublicProfileViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [friendStatus, setFriendStatus] = useState<'none' | 'friends' | 'incoming' | 'outgoing'>('none');
   const [followStatus, setFollowStatus] = useState<{ following: boolean }>({ following: false });
+  const [blocked, setBlocked] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const getToken = async (): Promise<string | null> => {
@@ -57,6 +58,8 @@ const PublicProfileView: React.FC<PublicProfileViewProps> = ({
       ]);
       setFriendStatus(fs.status);
       setFollowStatus(fl);
+      const bs = await apiFetch('/api/blocked', { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json());
+      setBlocked(Array.isArray(bs) ? bs.some((b: User) => b.id === userId) : false);
     } catch (err) {
       console.error(err);
     }
@@ -127,6 +130,17 @@ const PublicProfileView: React.FC<PublicProfileViewProps> = ({
               className={`px-5 py-2.5 rounded-full text-sm font-black transition-all ${followStatus.following ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700' : 'bg-pink-600 hover:bg-pink-500 text-white'}`}
             >
               {followStatus.following ? 'Following' : 'Follow'}
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm(blocked ? 'Unblock this user?' : 'Block this user? They won\'t be able to see your content or message you.')) {
+                  act(`/api/block/${userId}`, blocked ? 'DELETE' : 'POST').then(() => setBlocked(!blocked));
+                }
+              }}
+              disabled={busy}
+              className="px-5 py-2.5 rounded-full text-sm font-black bg-zinc-800/60 text-zinc-400 hover:bg-red-600/20 hover:text-red-400 border border-zinc-800"
+            >
+              {blocked ? 'Unblock' : 'Block'}
             </button>
           </div>
         )}
