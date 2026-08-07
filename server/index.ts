@@ -890,12 +890,14 @@ app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        // Luma Ray — text-to-video, fast and decent quality
-        version: 'luma/ray',
+        // Google Veo 3 — text-to-video, supports 9:16 portrait + audio
+        version: '5e80c73750ffc5dfbe5cee2d694c6ed3da7706660d9132613e6736443b365464',
         input: {
           prompt: prompt.trim(),
-          duration: 5,
+          duration: 6,
           aspect_ratio: '9:16',
+          resolution: '720p',
+          generate_audio: true,
         },
       }),
     });
