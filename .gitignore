@@ -422,3 +422,5 @@ android/**/*.jks
 android/keystore.properties
 android/trippintv-release.keystore
 trippintv-release.keystore
+..env.swp
+*.swp
