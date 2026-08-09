@@ -970,9 +970,24 @@ app.post('/api/credits/earn', authenticateUser, async (req: any, res: any) => {
   }
 });
 
-// --- AI VIDEO GENERATION (Replicate) ---
+// --- AI VIDEO GENERATION (Agnes AI free provider, with Replicate fallback) ---
 
 const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
+const AGNES_API_KEY = process.env.AGNES_API_KEY;
+const AGNES_BASE = 'https://apihub.agnes-ai.com';
+const VIDEO_CREDIT_COST = 5;
+
+const refundCredits = async (userId: string, amount = VIDEO_CREDIT_COST) => {
+  const { data: user } = await db.from('User').select('credits').eq('id', userId).single();
+  if (user) {
+    await db.from('User').update({ credits: (user.credits || 0) + amount }).eq('id', userId);
+  }
+  return (user?.credits || 0) + amount;
+};
+
+// Prefix prediction ids with the provider so the poll endpoint can route them
+// without changing the client contract. e.g. "agnes:<video_id>", "replicate:<prediction_id>".
+const makePredictionId = (provider: string, id: string) => `${provider}:${id}`;
 
 app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => {
   const { prompt } = req.body;
@@ -983,22 +998,61 @@ app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => 
     return res.status(400).json({ error: 'Prompt must be 500 characters or less' });
   }
 
-  if (!REPLICATE_API_TOKEN) {
-    return res.status(503).json({ error: 'AI video generation is not configured yet. Admin needs to set REPLICATE_API_TOKEN.' });
+  if (!AGNES_API_KEY && !REPLICATE_API_TOKEN) {
+    return res.status(503).json({ error: 'AI video generation is not configured yet. Admin needs to set AGNES_API_KEY.' });
   }
 
   try {
     // Check credits
     const { data: user } = await db.from('User').select('credits').eq('id', req.userId).single();
-    if (!user || (user.credits || 0) < 5) {
-      return res.status(403).json({ error: 'Not enough credits. You need 5 credits to generate a video.' });
+    if (!user || (user.credits || 0) < VIDEO_CREDIT_COST) {
+      return res.status(403).json({ error: `Not enough credits. You need ${VIDEO_CREDIT_COST} credits to generate a video.` });
     }
 
     // Deduct credits
-    const newCredits = user.credits - 5;
+    const newCredits = user.credits - VIDEO_CREDIT_COST;
     await db.from('User').update({ credits: newCredits }).eq('id', req.userId);
 
-    // Create prediction via Replicate API
+    const provider = AGNES_API_KEY ? 'agnes' : 'replicate';
+
+    if (provider === 'agnes') {
+      // Agnes Video V2.0 — free text-to-video, async task API
+      // 9:16 portrait ~720p, ~6s at 24fps (num_frames must be 8n+1, <= 441)
+      const response = await fetch(`${AGNES_BASE}/v1/videos`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${AGNES_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'agnes-video-v2.0',
+          prompt: prompt.trim(),
+          height: 1280,
+          width: 720,
+          num_frames: 145,
+          frame_rate: 24,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        console.error('Agnes API error:', err);
+        await refundCredits(req.userId);
+        return res.status(502).json({ error: 'Video generation service error. Credits refunded.' });
+      }
+
+      const task = await response.json();
+      const videoId = task.video_id || task.task_id || task.id;
+      if (!videoId) {
+        console.error('Agnes response missing video_id:', task);
+        await refundCredits(req.userId);
+        return res.status(502).json({ error: 'Video generation service error. Credits refunded.' });
+      }
+      res.json({ predictionId: makePredictionId('agnes', videoId), status: task.status || 'starting', credits: newCredits });
+      return;
+    }
+
+    // Create prediction via Replicate API (Google Veo 3)
     const response = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -1021,15 +1075,15 @@ app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => 
     if (!response.ok) {
       const err = await response.json();
       console.error('Replicate API error:', err);
-      // Refund credits on failure
-      await db.from('User').update({ credits: user.credits }).eq('id', req.userId);
+      await refundCredits(req.userId);
       return res.status(502).json({ error: 'Video generation service error. Credits refunded.' });
     }
 
     const prediction = await response.json();
-    res.json({ predictionId: prediction.id, status: prediction.status, credits: newCredits });
+    res.json({ predictionId: makePredictionId('replicate', prediction.id), status: prediction.status, credits: newCredits });
   } catch (err) {
     console.error('Generate video error:', err);
+    await refundCredits(req.userId);
     res.status(500).json({ error: 'Failed to start video generation' });
   }
 });
@@ -1037,12 +1091,48 @@ app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => 
 // Poll generation status
 app.get('/api/generate-video/:predictionId', authenticateUser, async (req: any, res: any) => {
   const { predictionId } = req.params;
-  if (!REPLICATE_API_TOKEN) {
-    return res.status(503).json({ error: 'Not configured' });
-  }
+  const sep = predictionId.indexOf(':');
+  const provider = sep > 0 ? predictionId.slice(0, sep) : 'replicate';
+  const id = sep > 0 ? predictionId.slice(sep + 1) : predictionId;
 
   try {
-    const response = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
+    if (provider === 'agnes') {
+      if (!AGNES_API_KEY) return res.status(503).json({ error: 'Not configured' });
+
+      const response = await fetch(`${AGNES_BASE}/agnesapi?video_id=${encodeURIComponent(id)}`, {
+        headers: { 'Authorization': `Bearer ${AGNES_API_KEY}` },
+      });
+      if (!response.ok) {
+        console.error('Agnes poll error:', await response.text());
+        return res.status(502).json({ error: 'Failed to check generation status' });
+      }
+      const task = await response.json();
+      const status = (task.status || task.internal_status || task.task_status || '').toLowerCase();
+
+      if (status === 'succeeded' || status === 'completed') {
+        const url = task.url
+          || (Array.isArray(task.metadata?.url) ? task.metadata.url[0] : task.metadata?.url)
+          || (Array.isArray(task.output) ? task.output[0] : task.output);
+        if (!url) {
+          const credits = await refundCredits(req.userId);
+          return res.json({ status: 'failed', error: 'Generation returned no video. Credits refunded.', credits });
+        }
+        return res.json({ status: 'succeeded', videoUrl: url });
+      }
+
+      if (status === 'failed' || status === 'error' || status === 'canceled' || status === 'cancelled' || task.error) {
+        const credits = await refundCredits(req.userId);
+        return res.json({ status: 'failed', error: task.error?.message || task.error || 'Generation failed. Credits refunded.', credits });
+      }
+
+      return res.json({ status: 'processing' });
+    }
+
+    if (!REPLICATE_API_TOKEN) {
+      return res.status(503).json({ error: 'Not configured' });
+    }
+
+    const response = await fetch(`https://api.replicate.com/v1/predictions/${id}`, {
       headers: { 'Authorization': `Bearer ${REPLICATE_API_TOKEN}` },
     });
     const prediction = await response.json();
@@ -1053,12 +1143,8 @@ app.get('/api/generate-video/:predictionId', authenticateUser, async (req: any, 
         videoUrl: prediction.output,
       });
     } else if (prediction.status === 'failed' || prediction.status === 'canceled') {
-      // Refund credits
-      const { data: user } = await db.from('User').select('credits').eq('id', req.userId).single();
-      if (user) {
-        await db.from('User').update({ credits: (user.credits || 0) + 5 }).eq('id', req.userId);
-      }
-      res.json({ status: prediction.status, error: prediction.error, credits: (user?.credits || 0) + 5 });
+      const credits = await refundCredits(req.userId);
+      res.json({ status: prediction.status, error: prediction.error, credits });
     } else {
       res.json({ status: prediction.status });
     }
