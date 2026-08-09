@@ -956,11 +956,11 @@ app.post('/api/credits/earn', authenticateUser, async (req: any, res: any) => {
   if (!amount) return res.status(400).json({ error: 'Unknown action' });
 
   try {
-    const { data: user, error: fetchErr } = await db.from('User').select('credits').eq('id', req.userId).single();
+    const { data: user, error: fetchErr } = await db.from('User').select('credits').eq('id', req.user.id).single();
     if (fetchErr || !user) return res.status(404).json({ error: 'User not found' });
 
     const newCredits = (user.credits || 0) + amount;
-    const { error: updateErr } = await db.from('User').update({ credits: newCredits }).eq('id', req.userId);
+    const { error: updateErr } = await db.from('User').update({ credits: newCredits }).eq('id', req.user.id);
     if (updateErr) throw updateErr;
 
     res.json({ credits: newCredits, earned: amount, action });
@@ -1004,14 +1004,14 @@ app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => 
 
   try {
     // Check credits
-    const { data: user } = await db.from('User').select('credits').eq('id', req.userId).single();
+    const { data: user } = await db.from('User').select('credits').eq('id', req.user.id).single();
     if (!user || (user.credits || 0) < VIDEO_CREDIT_COST) {
       return res.status(403).json({ error: `Not enough credits. You need ${VIDEO_CREDIT_COST} credits to generate a video.` });
     }
 
     // Deduct credits
     const newCredits = user.credits - VIDEO_CREDIT_COST;
-    await db.from('User').update({ credits: newCredits }).eq('id', req.userId);
+    await db.from('User').update({ credits: newCredits }).eq('id', req.user.id);
 
     const provider = AGNES_API_KEY ? 'agnes' : 'replicate';
 
@@ -1037,7 +1037,7 @@ app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => 
       if (!response.ok) {
         const err = await response.json();
         console.error('Agnes API error:', err);
-        await refundCredits(req.userId);
+        await refundCredits(req.user.id);
         return res.status(502).json({ error: 'Video generation service error. Credits refunded.' });
       }
 
@@ -1045,7 +1045,7 @@ app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => 
       const videoId = task.video_id || task.task_id || task.id;
       if (!videoId) {
         console.error('Agnes response missing video_id:', task);
-        await refundCredits(req.userId);
+        await refundCredits(req.user.id);
         return res.status(502).json({ error: 'Video generation service error. Credits refunded.' });
       }
       res.json({ predictionId: makePredictionId('agnes', videoId), status: task.status || 'starting', credits: newCredits });
@@ -1075,7 +1075,7 @@ app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => 
     if (!response.ok) {
       const err = await response.json();
       console.error('Replicate API error:', err);
-      await refundCredits(req.userId);
+      await refundCredits(req.user.id);
       return res.status(502).json({ error: 'Video generation service error. Credits refunded.' });
     }
 
@@ -1083,7 +1083,7 @@ app.post('/api/generate-video', authenticateUser, async (req: any, res: any) => 
     res.json({ predictionId: makePredictionId('replicate', prediction.id), status: prediction.status, credits: newCredits });
   } catch (err) {
     console.error('Generate video error:', err);
-    await refundCredits(req.userId);
+    await refundCredits(req.user.id);
     res.status(500).json({ error: 'Failed to start video generation' });
   }
 });
@@ -1114,14 +1114,14 @@ app.get('/api/generate-video/:predictionId', authenticateUser, async (req: any, 
           || (Array.isArray(task.metadata?.url) ? task.metadata.url[0] : task.metadata?.url)
           || (Array.isArray(task.output) ? task.output[0] : task.output);
         if (!url) {
-          const credits = await refundCredits(req.userId);
+          const credits = await refundCredits(req.user.id);
           return res.json({ status: 'failed', error: 'Generation returned no video. Credits refunded.', credits });
         }
         return res.json({ status: 'succeeded', videoUrl: url });
       }
 
       if (status === 'failed' || status === 'error' || status === 'canceled' || status === 'cancelled' || task.error) {
-        const credits = await refundCredits(req.userId);
+        const credits = await refundCredits(req.user.id);
         return res.json({ status: 'failed', error: task.error?.message || task.error || 'Generation failed. Credits refunded.', credits });
       }
 
@@ -1143,7 +1143,7 @@ app.get('/api/generate-video/:predictionId', authenticateUser, async (req: any, 
         videoUrl: prediction.output,
       });
     } else if (prediction.status === 'failed' || prediction.status === 'canceled') {
-      const credits = await refundCredits(req.userId);
+      const credits = await refundCredits(req.user.id);
       res.json({ status: prediction.status, error: prediction.error, credits });
     } else {
       res.json({ status: prediction.status });
