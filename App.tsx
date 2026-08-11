@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import Navbar from './components/Navbar';
 import VideoFeed from './components/VideoFeed';
 import Leaderboard from './components/Leaderboard';
@@ -309,6 +311,43 @@ const App: React.FC = () => {
     });
 
     return () => subscription.unsubscribe();
+  }, []);
+
+  // Native deep-link handler for Google OAuth: trippintv://auth/callback?code=...
+  // Completes the PKCE exchange started by AuthModal and returns the user to the app.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const handler = async (event: { url: string }) => {
+      const url = event.url;
+      if (!url.includes('/auth/callback')) return;
+
+      try {
+        const parsed = new URL(url);
+        const code = parsed.searchParams.get('code');
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+        } else if (parsed.hash) {
+          // Fallback: implicit tokens in the fragment (#access_token=...)
+          const params = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+          const accessToken = params.get('access_token');
+          const refreshToken = params.get('refresh_token');
+          if (accessToken) {
+            const { error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken || '',
+            });
+            if (error) throw error;
+          }
+        }
+      } catch (err) {
+        console.error('OAuth callback failed', err);
+      }
+    };
+
+    CapacitorApp.addListener('appUrlOpen', handler);
+    return () => { CapacitorApp.removeAllListeners().catch(() => {}); };
   }, []);
 
   const handleLogout = async () => {

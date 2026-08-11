@@ -1,9 +1,13 @@
 
 import React, { useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { User } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
 import { apiFetch, API_BASE } from '../src/lib/api';
 import { useToast } from './Toast';
+
+const OAUTH_REDIRECT = 'trippintv://auth/callback';
 
 interface AuthModalProps {
   onClose: () => void;
@@ -61,13 +65,26 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onAuthSuccess }) => {
   const handleGoogleLogin = async () => {
     setIsProcessing(true);
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
+      const isNative = Capacitor.isNativePlatform();
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${API_BASE || window.location.origin}/`,
+          redirectTo: isNative ? OAUTH_REDIRECT : `${window.location.origin}/`,
+          skipBrowserRedirect: isNative,
         },
       });
       if (error) throw error;
+
+      if (data?.url) {
+        if (isNative) {
+          // Open in an in-app browser tab; the app's deep link handler
+          // completes the session via exchangeCodeForSession.
+          await Browser.open({ url: data.url, windowName: '_self' });
+        } else {
+          // Web: redirect normally (current origin is the redirect target).
+          window.location.href = data.url;
+        }
+      }
     } catch (err: any) {
       showToast(err.message || 'Google Login Failed', 'error');
     } finally {
