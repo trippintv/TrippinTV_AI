@@ -46,7 +46,7 @@ const DisclaimerOverlay: React.FC<DisclaimerOverlayProps> = ({ onAgree }) => {
             See something bad? Report it from any post, video, or profile. You can also block any user.
           </p>
           <p className="mt-4 italic text-zinc-500 text-xs">
-            By clicking agree, you acknowledge that you are responsible for the content you upload, that you are old enough to use the app, and you hold Trippin' TV harmless for any legal actions arising from your posts. See our <a href="https://trippintv-ai.onrender.com/terms" target="_blank" rel="noopener" className="text-purple-400 underline">Terms of Service</a> and <a href="https://trippintv-ai.onrender.com/privacy" target="_blank" rel="noopener" className="text-purple-400 underline">Privacy Policy</a>.
+            By clicking agree, you acknowledge that you are responsible for the content you upload, that you are old enough to use the app, and you hold Trippin' TV harmless for any legal actions arising from your posts. See our <a href={`${window.location.origin}/terms`} target="_blank" rel="noopener" className="text-purple-400 underline">Terms of Service</a> and <a href={`${window.location.origin}/privacy`} target="_blank" rel="noopener" className="text-purple-400 underline">Privacy Policy</a>.
           </p>
         </div>
 
