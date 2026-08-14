@@ -173,7 +173,7 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ user, onClose, onVideoC
                     const cr = await apiFetch('/api/credits/earn', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                      body: JSON.stringify({ action: 'daily_login' }), // reuse 5-credit action
+                      body: JSON.stringify({ action: 'ad' }),
                     });
                     if (cr.ok) {
                       const { credits } = await cr.json();

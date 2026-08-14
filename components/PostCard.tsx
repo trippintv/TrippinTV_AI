@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Post, User, Comment, ReactionType, ReactionSummary } from '../types';
 import { moderateContent } from '../services/geminiService';
 import ReportModal from './ReportModal';
+import RichText from './RichText';
 import { useToast } from './Toast';
 
 const REACTIONS: { type: ReactionType; emoji: string; label: string }[] = [
@@ -19,6 +20,8 @@ interface PostCardProps {
   onOpenProfile: (userId: string) => void;
   onShare: (post: Post) => void;
   onReact: (postId: string, type: ReactionType) => void;
+  onOpenUsername?: (username: string) => void;
+  onSelectTopic?: (tag: string) => void;
 }
 
 const PostCard: React.FC<PostCardProps> = ({
@@ -28,6 +31,8 @@ const PostCard: React.FC<PostCardProps> = ({
   onOpenProfile,
   onShare,
   onReact,
+  onOpenUsername,
+  onSelectTopic,
 }) => {
   const [commentText, setCommentText] = useState('');
   const [replyTo, setReplyTo] = useState<{ id: string; username: string } | null>(null);
@@ -88,7 +93,9 @@ const PostCard: React.FC<PostCardProps> = ({
         </div>
 
         {post.title && <h3 className="text-lg font-bold mb-1.5">{post.title}</h3>}
-        <p className="text-zinc-200 text-sm leading-relaxed whitespace-pre-wrap break-words">{post.text}</p>
+        <p className="text-zinc-200 text-sm leading-relaxed whitespace-pre-wrap break-words">
+          <RichText text={post.text} onOpenUsername={onOpenUsername} onSelectTopic={onSelectTopic} />
+        </p>
       </div>
 
       {/* Reaction summary bar */}
@@ -167,7 +174,9 @@ const PostCard: React.FC<PostCardProps> = ({
                     />
                     <div className="flex-1 min-w-0">
                       <span className="text-xs font-black text-zinc-400 block mb-0.5 uppercase tracking-tighter">@{c.username}</span>
-                      <p className="text-sm text-zinc-200 leading-tight break-words">{c.text}</p>
+                      <p className="text-sm text-zinc-200 leading-tight break-words">
+                        <RichText text={c.text} onOpenUsername={onOpenUsername} onSelectTopic={onSelectTopic} />
+                      </p>
                       {user && (
                         <button
                           onClick={() => setReplyTo({ id: c.id, username: c.username })}
@@ -188,7 +197,9 @@ const PostCard: React.FC<PostCardProps> = ({
                         />
                         <div className="flex-1 min-w-0">
                           <span className="text-[10px] font-black text-zinc-500 block mb-0.5 uppercase tracking-tighter">@{r.username}</span>
-                          <p className="text-xs text-zinc-300 leading-tight break-words">{r.text}</p>
+                          <p className="text-xs text-zinc-300 leading-tight break-words">
+                            <RichText text={r.text} onOpenUsername={onOpenUsername} onSelectTopic={onSelectTopic} />
+                          </p>
                         </div>
                       </div>
                     ))}

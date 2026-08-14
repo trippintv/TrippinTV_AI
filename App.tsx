@@ -52,6 +52,12 @@ const App: React.FC = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [newVideosCount, setNewVideosCount] = useState(0);
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
+  const [savedVideos, setSavedVideos] = useState<Video[]>([]);
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [topics, setTopics] = useState<string[]>([]);
+  const [activeTopic, setActiveTopic] = useState<string | null>(null);
+  const [referralCount, setReferralCount] = useState(0);
+  const pendingReferralRef = useRef<string | null>(null);
   const { showToast } = useToast();
 
   // Supabase Realtime setup
@@ -107,21 +113,24 @@ const App: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, videosRes, postsRes] = await Promise.all([
+        const [usersRes, videosRes, postsRes, topicsRes] = await Promise.all([
           apiFetch('/api/users'),
           apiFetch('/api/videos'),
-          apiFetch('/api/posts')
+          apiFetch('/api/posts'),
+          apiFetch('/api/topics')
         ]);
         const users = await usersRes.json();
         const videosData = await videosRes.json();
         const videoList = videosData.videos || [];
         const postsData = await postsRes.json();
         const postList = postsData.posts || [];
+        const topicsData = await topicsRes.json();
         setAllUsers(users);
         setPosts(postList);
         setHasMorePosts(postsData.hasMore);
         setVideos(videoList);
         setHasMoreVideos(videosData.hasMore);
+        setTopics((topicsData.topics || []).map((t: any) => t.tag));
 
         if (postList.length > 0) {
           const postResults = await Promise.all(
@@ -164,6 +173,73 @@ const App: React.FC = () => {
     };
     fetchData();
   }, []);
+
+  // Referral deep link: /r/:code
+  useEffect(() => {
+    const rMatch = window.location.pathname.match(/^\/r\/(.+)$/);
+    if (!rMatch) return;
+    pendingReferralRef.current = decodeURIComponent(rMatch[1]);
+    window.history.replaceState({}, '', '/');
+    if (!localStorage.getItem('trippin_user')) {
+      setIsAuthModalOpen(true);
+    }
+  }, []);
+
+  // Claim a pending referral code once the user is signed in.
+  useEffect(() => {
+    if (!user) return;
+    const code = pendingReferralRef.current;
+    if (!code) return;
+    pendingReferralRef.current = null;
+    (async () => {
+      try {
+        const token = await getToken();
+        const res = await apiFetch('/api/referrals/claim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ code }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setUser(prev => prev ? { ...prev, credits: data.credits, referredBy: data.referredBy } : null);
+          setReferralCount(prev => prev + 1);
+          showToast(`+${data.bonus} credits from your invite! 🎉`, 'success');
+        } else if (data.error) {
+          showToast(data.error, 'error');
+        }
+      } catch {}
+    })();
+  }, [user?.id]);
+
+  // Load saved videos, referral info, and refresh topics when the user changes.
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const token = await getToken();
+        const [savedRes, refRes, topicsRes] = await Promise.all([
+          apiFetch('/api/videos/saved', { headers: { 'Authorization': `Bearer ${token}` } }),
+          apiFetch('/api/referrals', { headers: { 'Authorization': `Bearer ${token}` } }),
+          apiFetch('/api/topics'),
+        ]);
+        if (savedRes.ok) {
+          const d = await savedRes.json();
+          setSavedVideos(d.videos || []);
+          setSavedIds(new Set(d.ids || []));
+        }
+        if (refRes.ok) {
+          const d = await refRes.json();
+          setReferralCount(d.referralCount || 0);
+        }
+        if (topicsRes.ok) {
+          const d = await topicsRes.json();
+          setTopics((d.topics || []).map((t: any) => t.tag));
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+  }, [user?.id]);
 
   // Video polling — detect new videos every 60s
   useEffect(() => {
@@ -217,7 +293,9 @@ const App: React.FC = () => {
     setLoadingMoreVideos(true);
     try {
       const last = videos[videos.length - 1];
-      const res = await apiFetch(`/api/videos?before=${last.createdAt}`);
+      let url = `/api/videos?before=${last.createdAt}`;
+      if (activeTopic) url += `&tag=${encodeURIComponent(activeTopic)}`;
+      const res = await apiFetch(url);
       const data = await res.json();
       setVideos(prev => [...prev, ...(data.videos || [])]);
       setHasMoreVideos(data.hasMore);
@@ -265,8 +343,13 @@ const App: React.FC = () => {
             body: JSON.stringify({ action: 'daily_login' }),
           });
           if (cr.ok) {
-            const { credits } = await cr.json();
-            setUser(prev => prev ? { ...prev, credits } : null);
+            const { credits, streakDays } = await cr.json();
+            setUser(prev => prev ? { ...prev, credits, streakDays: streakDays ?? prev.streakDays } : null);
+            if (streakDays && streakDays > 1) {
+              showToast(`${streakDays}-day streak! 🔥`, 'success');
+            } else {
+              showToast('+5 daily credits!', 'success');
+            }
           }
         } catch {}
       }
@@ -655,6 +738,62 @@ const App: React.FC = () => {
     }
   };
 
+  const handleOpenUsername = (username: string) => {
+    const target = allUsers.find(u => u.username.toLowerCase() === username.toLowerCase());
+    if (target) {
+      handleOpenProfile(target.id);
+    } else {
+      showToast(`Couldn't find @${username}`, 'info');
+    }
+  };
+
+  const handleSelectTopic = async (tag: string | null) => {
+    setActiveTopic(tag);
+    setCurrentView('feed');
+    window.history.pushState({}, '', '/');
+    try {
+      const res = await apiFetch(`/api/videos${tag ? `?tag=${encodeURIComponent(tag)}` : ''}`);
+      const data = await res.json();
+      setVideos(data.videos || []);
+      setHasMoreVideos(data.hasMore);
+    } catch (err) {
+      console.error(err);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleToggleSave = async (videoId: string) => {
+    if (!user) { setIsAuthModalOpen(true); return; }
+    haptic('light');
+    const isSaved = savedIds.has(videoId);
+    setSavedIds(prev => {
+      const next = new Set(prev);
+      if (isSaved) next.delete(videoId); else next.add(videoId);
+      return next;
+    });
+    try {
+      const token = await getToken();
+      const res = await apiFetch(`/api/videos/${videoId}/save`, {
+        method: isSaved ? 'DELETE' : 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Save failed');
+      const savedRes = await apiFetch('/api/videos/saved', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (savedRes.ok) {
+        const d = await savedRes.json();
+        setSavedVideos(d.videos || []);
+        setSavedIds(new Set(d.ids || []));
+      }
+    } catch {
+      setSavedIds(prev => {
+        const next = new Set(prev);
+        if (isSaved) next.add(videoId); else next.delete(videoId);
+        return next;
+      });
+      showToast('Failed to save', 'error');
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-black text-white flex flex-col">
@@ -700,7 +839,8 @@ const App: React.FC = () => {
             <>
               {newVideosCount > 0 && (
                 <button
-                  onClick={async () => { try { const res = await apiFetch('/api/videos'); const data = await res.json(); setVideos(data.videos || []); setHasMoreVideos(data.hasMore); } catch {} setNewVideosCount(0); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  onClick={async () => {
+                    try { const res = await apiFetch(`/api/videos${activeTopic ? `?tag=${encodeURIComponent(activeTopic)}` : ''}`); const data = await res.json(); setVideos(data.videos || []); setHasMoreVideos(data.hasMore); } catch {} setNewVideosCount(0); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                   className="w-full mb-4 py-2 bg-purple-600/20 border border-purple-500/30 rounded-full text-purple-400 text-xs font-bold hover:bg-purple-600/30 transition-all animate-banner-slide-down"
                 >
                   {newVideosCount} new video{newVideosCount > 1 ? 's' : ''} — tap to refresh
@@ -725,7 +865,7 @@ const App: React.FC = () => {
                           const cr = await apiFetch('/api/credits/earn', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify({ action: 'daily_login' }),
+                            body: JSON.stringify({ action: 'ad' }),
                           });
                           if (cr.ok) {
                             const { credits } = await cr.json();
@@ -748,6 +888,12 @@ const App: React.FC = () => {
                 onReact={handleReact}
                 onOpenProfile={handleOpenProfile}
                 onShare={handleShare}
+                onToggleSave={handleToggleSave}
+                onOpenUsername={handleOpenUsername}
+                onSelectTopic={handleSelectTopic}
+                topics={topics}
+                activeTopic={activeTopic}
+                savedIds={savedIds}
                 user={user}
                 hasMore={hasMoreVideos}
                 loadingMore={loadingMoreVideos}
@@ -781,6 +927,8 @@ const App: React.FC = () => {
                     onOpenProfile={handleOpenProfile}
                     onShare={handleShare as any}
                     onReact={handlePostReact}
+                    onOpenUsername={handleOpenUsername}
+                    onSelectTopic={handleSelectTopic}
                     user={user}
                   />
                 ))
@@ -801,6 +949,8 @@ const App: React.FC = () => {
               user={user} 
               videos={videos.filter(v => v.userId === user.id)} 
               onUpdateUser={handleUpdateUser}
+              savedVideos={savedVideos}
+              referralCount={referralCount}
             />
           )}
           {currentView === 'chat' && user && (

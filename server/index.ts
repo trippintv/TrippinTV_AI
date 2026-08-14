@@ -126,6 +126,7 @@ app.get('/api/users', async (req: any, res: any) => {
           avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${supabaseUser.id}`,
           points: 0,
           hasAgreedToDisclaimer: false,
+          referralCode: await generateReferralCode(),
         }).select().single();
         user = created;
       }
@@ -223,6 +224,47 @@ app.delete('/api/users/me', authenticateUser, async (req: any, res: any) => {
   }
 });
 
+// --- Referrals ---
+// Get the current user's referral info.
+app.get('/api/referrals', authenticateUser, async (req: any, res: any) => {
+  try {
+    const { data: user } = await db.from('User').select('referralCode, referredBy').eq('id', req.user.id).single();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const { count } = await db.from('User').select('*', { count: 'exact', head: true }).eq('referredBy', req.user.id);
+    res.json({ referralCode: user.referralCode, referredBy: user.referredBy, referralCount: count || 0 });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load referral info' });
+  }
+});
+
+// Claim a referral code: referrer gets +10 credits, new user gets +5.
+app.post('/api/referrals/claim', authenticateUser, async (req: any, res: any) => {
+  const { code } = req.body;
+  if (!code || typeof code !== 'string') return res.status(400).json({ error: 'Referral code is required' });
+  try {
+    const clean = code.trim().toUpperCase();
+    const { data: referrer } = await db.from('User').select('id, username, credits').ilike('referralCode', clean).maybeSingle();
+    if (!referrer) return res.status(404).json({ error: 'Invalid referral code' });
+    if (referrer.id === req.user.id) return res.status(400).json({ error: 'You cannot use your own referral code' });
+
+    const { data: me } = await db.from('User').select('username, credits, referredBy').eq('id', req.user.id).single();
+    if (!me) return res.status(404).json({ error: 'User not found' });
+    if (me.referredBy) return res.status(400).json({ error: 'You have already used a referral code' });
+
+    await db.from('User').update({ referredBy: referrer.id, credits: (me.credits || 0) + 5 }).eq('id', req.user.id);
+    await db.from('User').update({ credits: (referrer.credits || 0) + 10 }).eq('id', referrer.id);
+    await createNotification({
+      recipientId: referrer.id, actorId: req.user.id, type: 'referral', entityId: null,
+      text: `@${me.username || 'Someone'} joined with your code! +10 credits`,
+    });
+
+    res.json({ credits: (me.credits || 0) + 5, bonus: 5, referredBy: referrer.id });
+  } catch (error: any) {
+    console.error('Referral claim failed', error);
+    res.status(500).json({ error: 'Failed to claim referral' });
+  }
+});
+
 // --- Friends ---
 const areFriends = async (a: string, b: string): Promise<boolean> => {
   const { count } = await db.from('Friendship').select('*', { count: 'exact', head: true })
@@ -237,6 +279,72 @@ const createNotification = async (data: {
     await db.from('Notification').insert({ read: false, ...data });
   } catch (err) {
     console.error('Notification create failed', err);
+  }
+};
+
+// Generate a short unique referral code for a user.
+const generateReferralCode = async (): Promise<string> => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  for (let attempt = 0; attempt < 10; attempt++) {
+    let code = 'TRIP';
+    for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    const { data: existing } = await db.from('User').select('id').ilike('referralCode', code).maybeSingle();
+    if (!existing) return code;
+  }
+  return `TRIP${Date.now().toString(36).toUpperCase()}`;
+};
+
+// Extract #hashtags from text and index them for trending topics.
+const indexHashtags = async (text: string, videoId?: string, postId?: string) => {
+  try {
+    const tags = Array.from(new Set(
+      (text.match(/#[A-Za-z0-9_]+/g) || []).map((t: string) => t.slice(1).toLowerCase())
+    ));
+    if (!tags.length) return;
+    for (const tag of tags) {
+      const { data: existing } = await db.from('Hashtag').select('id').eq('id', tag).maybeSingle();
+      if (!existing) {
+        await db.from('Hashtag').insert({ id: tag, tag });
+      }
+      if (videoId) {
+        try { await db.from('VideoHashtag').insert({ id: `${tag}:${videoId}`, hashtagId: tag, videoId }); } catch { /* duplicate */ }
+      }
+      if (postId) {
+        try { await db.from('PostHashtag').insert({ id: `${tag}:${postId}`, hashtagId: tag, postId }); } catch { /* duplicate */ }
+      }
+    }
+  } catch (err) {
+    console.error('Hashtag indexing failed', err);
+  }
+};
+
+// Lightweight feed personalization: boost videos from followed users and from
+// categories the user has engaged with (reactions/comments).
+const personalizeFeed = async (videos: any[], userId: string) => {
+  try {
+    const [followRes, reactRes, commentRes] = await Promise.all([
+      db.from('Follow').select('followingId').eq('followerId', userId),
+      db.from('Reaction').select('Video(category)').eq('userId', userId),
+      db.from('Comment').select('Video(category)').eq('userId', userId),
+    ]);
+    const followSet = new Set((followRes.data || []).map((f: any) => f.followingId));
+    const aff: Record<string, number> = {};
+    const bump = (cat: string | null | undefined) => { if (cat) aff[cat] = (aff[cat] || 0) + 1; };
+    (reactRes.data || []).forEach((r: any) => bump(r.Video?.category));
+    (commentRes.data || []).forEach((c: any) => bump(c.Video?.category));
+    const maxAff = Math.max(1, ...Object.values(aff));
+    const scored = (videos || []).map((v: any, i: number) => {
+      let score = (videos.length - i) * 10;
+      if (followSet.has(v.userId)) score += 200;
+      score += ((aff[v.category] || 0) / maxAff) * 120;
+      score += Math.random() * 30;
+      return { v, score };
+    });
+    scored.sort((a: any, b: any) => b.score - a.score);
+    return scored.map((s: any) => s.v);
+  } catch (err) {
+    console.error('Personalization failed', err);
+    return videos;
   }
 };
 
@@ -422,9 +530,18 @@ app.get('/api/friends/status/:userId', authenticateUser, async (req: any, res: a
 
 // --- Videos ---
 app.get('/api/videos', optionalUser, async (req: any, res: any) => {
-  const { before, limit: limitParam } = req.query;
+  const { before, limit: limitParam, tag } = req.query;
   const pageSize = Math.min(parseInt(limitParam as string) || 20, 50);
   try {
+    if (tag) {
+      const { data: rows } = await db.from('VideoHashtag').select('videoId').eq('hashtagId', String(tag).toLowerCase());
+      const ids = (rows || []).map((r: any) => r.videoId);
+      const { data, error: tagError } = await db.from('Video').select('*, Comment(*)')
+        .in('id', ids.length ? ids : ['__none__'])
+        .order('createdAt', { ascending: false }).limit(pageSize + 1);
+      if (tagError) throw tagError;
+      return res.json({ videos: data || [], hasMore: false });
+    }
     let query = db.from('Video').select('*, Comment(*)').order('createdAt', { ascending: false }).limit(pageSize + 1);
     if (before) query = query.lt('createdAt', before);
     let { data: videos, error } = await query;
@@ -435,6 +552,10 @@ app.get('/api/videos', optionalUser, async (req: any, res: any) => {
       const blocked = await getBlockedIds(req.user.id);
       if (blocked.length > 0) {
         videos = (videos || []).filter((v: any) => !blocked.includes(v.userId));
+      }
+      // Personalize the first page (cursor pagination keeps chronology intact).
+      if (!before) {
+        videos = await personalizeFeed(videos || [], req.user.id);
       }
     }
 
@@ -472,6 +593,7 @@ app.post('/api/videos', authenticateUser, upload.single('video'), async (req: an
       description: aiDescription, videoUrl: publicUrl, thumbnailUrl: '/uploads/default-thumb.jpg',
     }).select().single();
     if (insertError) throw insertError;
+    await indexHashtags(`${title || ''} ${aiDescription}`, video.id);
     res.json(video);
   } catch (error: any) {
     console.error(error);
@@ -498,6 +620,7 @@ app.post('/api/videos/from-url', authenticateUser, async (req: any, res: any) =>
       isAiGenerated: true,
     }).select().single();
     if (insertError) throw insertError;
+    await indexHashtags(`${title || ''} ${description || ''}`, video.id);
 
     // Award 3 credits for posting
     const { data: user } = await db.from('User').select('credits, points').eq('id', userId).single();
@@ -509,6 +632,52 @@ app.post('/api/videos/from-url', authenticateUser, async (req: any, res: any) =>
   } catch (error: any) {
     console.error(error);
     res.status(500).json({ error: error.message || 'Server Error' });
+  }
+});
+
+// --- Save / Bookmark videos ---
+app.post('/api/videos/:id/save', authenticateUser, async (req: any, res: any) => {
+  try {
+    await db.from('SavedVideo').insert({ userId: req.user.id, videoId: req.params.id });
+    res.json({ saved: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to save' });
+  }
+});
+
+app.delete('/api/videos/:id/save', authenticateUser, async (req: any, res: any) => {
+  try {
+    await db.from('SavedVideo').delete().eq('userId', req.user.id).eq('videoId', req.params.id);
+    res.json({ saved: false });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to unsave' });
+  }
+});
+
+app.get('/api/videos/saved', authenticateUser, async (req: any, res: any) => {
+  try {
+    const { data: rows } = await db.from('SavedVideo').select('videoId')
+      .eq('userId', req.user.id).order('createdAt', { ascending: false });
+    const ids = (rows || []).map((r: any) => r.videoId);
+    if (!ids.length) return res.json({ videos: [], ids: [] });
+    const { data: videos } = await db.from('Video').select('*, Comment(*)').in('id', ids);
+    const orderMap: Record<string, number> = {};
+    ids.forEach((id, i) => (orderMap[id] = i));
+    const sorted = (videos || []).sort((a: any, b: any) => (orderMap[a.id] ?? 999) - (orderMap[b.id] ?? 999));
+    res.json({ videos: sorted, ids });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load saved videos' });
+  }
+});
+
+// --- Trending topics (hashtags) ---
+app.get('/api/topics', async (req: any, res: any) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string) || 12, 25);
+    const { data } = await db.rpc('get_trending_topics', { lim: limit });
+    res.json({ topics: data || [] });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load topics' });
   }
 });
 
@@ -533,8 +702,6 @@ app.post('/api/videos/:id/vote', authenticateUser, async (req: any, res: any) =>
     res.status(500).json({ error: "Vote failed" });
   }
 });
-
-// --- Reactions ---
 const REACTION_TYPES = ['fire', 'laugh', 'skull', 'heart', 'eyes'];
 
 app.post('/api/videos/:id/react', authenticateUser, async (req: any, res: any) => {
@@ -647,6 +814,7 @@ app.post('/api/posts', authenticateUser, async (req: any, res: any) => {
     }).select().single();
     if (error) throw error;
     await incrementCol('User', 'points', userId, 10);
+    await indexHashtags(`${title || ''} ${text}`, undefined, post.id);
     res.status(201).json(post);
   } catch (error) {
     res.status(500).json({ error: 'Post failed' });
@@ -950,12 +1118,34 @@ app.post('/api/credits/earn', authenticateUser, async (req: any, res: any) => {
     comment: 2,
     post: 3,
     daily_login: 5,
+    ad: 5,
     referral: 10,
   };
   const amount = amounts[action];
   if (!amount) return res.status(400).json({ error: 'Unknown action' });
 
   try {
+    // Daily login rewards carry a streak: yesterday -> +1 day, today -> no-op,
+    // otherwise the streak resets to 1. Bonus grows up to +50 credits.
+    if (action === 'daily_login') {
+      const { data: user, error: fetchErr } = await db.from('User')
+        .select('credits, streakDays, lastLoginAt').eq('id', req.user.id).single();
+      if (fetchErr || !user) return res.status(404).json({ error: 'User not found' });
+
+      const now = new Date();
+      const last = user.lastLoginAt ? new Date(user.lastLoginAt) : null;
+      const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+      if (last && last >= todayStart) {
+        return res.json({ credits: user.credits || 0, earned: 0, action, alreadyEarned: true, streakDays: user.streakDays || 0 });
+      }
+      const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+      const streakDays = last && last >= yesterdayStart && last < todayStart ? (user.streakDays || 0) + 1 : 1;
+      const earned = Math.min(5 + (streakDays - 1) * 5, 50);
+      const newCredits = (user.credits || 0) + earned;
+      await db.from('User').update({ credits: newCredits, streakDays, lastLoginAt: now.toISOString() }).eq('id', req.user.id);
+      return res.json({ credits: newCredits, earned, action, streakDays });
+    }
+
     const { data: user, error: fetchErr } = await db.from('User').select('credits').eq('id', req.user.id).single();
     if (fetchErr || !user) return res.status(404).json({ error: 'User not found' });
 

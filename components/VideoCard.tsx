@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Video, User, Comment, ReactionType, ReactionSummary } from '../types';
 import { moderateContent } from '../services/geminiService';
 import ReportModal from './ReportModal';
+import RichText from './RichText';
 import { useToast } from './Toast';
 
 interface VideoCardProps {
@@ -13,6 +14,10 @@ interface VideoCardProps {
   onOpenProfile: (userId: string) => void;
   onShare: (video: Video) => void;
   onReact: (videoId: string, type: ReactionType) => void;
+  onToggleSave?: (videoId: string) => void;
+  onOpenUsername?: (username: string) => void;
+  onSelectTopic?: (tag: string) => void;
+  savedIds?: Set<string>;
   reactionSummary?: ReactionSummary;
   userReactions?: ReactionType[];
 }
@@ -33,9 +38,14 @@ const VideoCard: React.FC<VideoCardProps> = ({
   onOpenProfile,
   onShare,
   onReact,
+  onToggleSave,
+  onOpenUsername,
+  onSelectTopic,
+  savedIds,
   reactionSummary,
   userReactions = [],
 }) => {
+  const saved = savedIds?.has(video.id) ?? false;
   const [commentText, setCommentText] = useState('');
   const [replyTo, setReplyTo] = useState<{ id: string; username: string } | null>(null);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
@@ -126,6 +136,16 @@ const VideoCard: React.FC<VideoCardProps> = ({
           loop muted autoPlay playsInline
         />
 
+        {video.isAiGenerated && (
+          <div className="absolute top-3 left-3 z-10 pointer-events-none">
+            <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-sm border border-purple-500/40 rounded-full pl-2 pr-3 py-1">
+              <SparklesIcon className="w-3.5 h-3.5 text-purple-300" />
+              <span className="text-[11px] font-black text-white drop-shadow">@{video.username}</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-purple-300">AI</span>
+            </div>
+          </div>
+        )}
+
         {showTapOverlay && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
             <div className="animate-ping absolute">
@@ -178,6 +198,19 @@ const VideoCard: React.FC<VideoCardProps> = ({
             <span className="text-xs font-bold drop-shadow-md">Share</span>
           </div>
 
+          {onToggleSave && (
+            <div className="flex flex-col items-center gap-1">
+              <button
+                onClick={() => onToggleSave(video.id)}
+                className={`p-3 rounded-full transition-all ${saved ? 'bg-amber-600' : 'bg-zinc-800/80 hover:bg-zinc-700'}`}
+                title={saved ? 'Unsave' : 'Save'}
+              >
+                <SaveIcon className="w-7 h-7" />
+              </button>
+              <span className="text-xs font-bold drop-shadow-md">{saved ? 'Saved' : 'Save'}</span>
+            </div>
+          )}
+
           <div className="flex flex-col items-center gap-1">
             <button onClick={toggleFullscreen} className="p-3 rounded-full bg-zinc-800/80 hover:bg-zinc-700 transition-all">
               <FullscreenIcon className="w-7 h-7" />
@@ -226,7 +259,9 @@ const VideoCard: React.FC<VideoCardProps> = ({
               </button>
             </div>
             <h3 className="text-lg font-bold mb-1">{video.title}</h3>
-            <p className="text-zinc-300 text-sm line-clamp-2">{video.description}</p>
+            <p className="text-zinc-300 text-sm line-clamp-2">
+              <RichText text={video.description} onOpenUsername={onOpenUsername} onSelectTopic={onSelectTopic} />
+            </p>
             {video.isAiGenerated && (
               <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-purple-300 bg-purple-600/15 border border-purple-600/40 rounded-full px-2 py-0.5 mt-2">
                 <SparklesIcon className="w-3 h-3" /> AI-generated
@@ -250,7 +285,9 @@ const VideoCard: React.FC<VideoCardProps> = ({
                     />
                     <div className="flex-1 min-w-0">
                       <span className="text-xs font-black text-zinc-400 block mb-0.5 uppercase tracking-tighter">@{c.username}</span>
-                      <p className="text-sm text-zinc-200 leading-tight break-words">{c.text}</p>
+                      <p className="text-sm text-zinc-200 leading-tight break-words">
+                        <RichText text={c.text} onOpenUsername={onOpenUsername} onSelectTopic={onSelectTopic} />
+                      </p>
                       {user && (
                         <button
                           onClick={() => setReplyTo({ id: c.id, username: c.username })}
@@ -272,7 +309,9 @@ const VideoCard: React.FC<VideoCardProps> = ({
                         />
                         <div className="flex-1 min-w-0">
                           <span className="text-[10px] font-black text-zinc-500 block mb-0.5 uppercase tracking-tighter">@{r.username}</span>
-                          <p className="text-xs text-zinc-300 leading-tight break-words">{r.text}</p>
+                          <p className="text-xs text-zinc-300 leading-tight break-words">
+                            <RichText text={r.text} onOpenUsername={onOpenUsername} onSelectTopic={onSelectTopic} />
+                          </p>
                         </div>
                       </div>
                     ))}
@@ -344,6 +383,7 @@ const ShareIcon = ({className}: {className:string}) => <svg className={className
 const SendIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>;
 const SparklesIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>;
 const FullscreenIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>;
+const SaveIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>;
 const ReportIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>;
 
 export default VideoCard;

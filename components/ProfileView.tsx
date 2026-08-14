@@ -11,9 +11,11 @@ interface ProfileViewProps {
   user: User;
   videos: Video[];
   onUpdateUser: (updates: Partial<User>) => void;
+  savedVideos: Video[];
+  referralCount: number;
 }
 
-const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser }) => {
+const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser, savedVideos, referralCount }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isEditingBio, setIsEditingBio] = useState(false);
   const [bioText, setBioText] = useState(user.bio || "I'm here to find the wildest trips on the internet. Follow me for daily madness! 🔥");
@@ -23,8 +25,50 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
   const [usernameText, setUsernameText] = useState(user.username);
   const [isCheckingUsername, setIsCheckingUsername] = useState(false);
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [showSaved, setShowSaved] = useState(false);
   const totalTrips = videos.reduce((acc, v) => acc + v.trips, 0);
   const { showToast } = useToast();
+
+  const referralLink = user.referralCode ? `${window.location.origin}/r/${user.referralCode}` : '';
+
+  const handleCopyReferral = async () => {
+    try {
+      await navigator.clipboard.writeText(referralLink);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 1500);
+      showToast('Referral link copied!', 'success');
+    } catch {
+      showToast('Could not copy link', 'error');
+    }
+  };
+
+  const handleClaimReferral = async () => {
+    const code = referralCodeInput.trim();
+    if (!code || isClaiming) return;
+    setIsClaiming(true);
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      const res = await apiFetch('/api/referrals/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        onUpdateUser({ credits: data.credits, referredBy: data.referredBy });
+        setReferralCodeInput('');
+        showToast(`+${data.bonus} credits! Welcome to the family 🎉`, 'success');
+      } else {
+        showToast(data.error || 'Failed to claim referral', 'error');
+      }
+    } catch {
+      showToast('Failed to claim referral', 'error');
+    }
+    setIsClaiming(false);
+  };
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -223,6 +267,12 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
               <span className="block text-2xl font-black text-white">{totalTrips.toLocaleString()}</span>
               <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Total Trips</span>
             </div>
+            {(user.streakDays || 0) > 0 && (
+              <div className="text-center md:text-left" title="Daily login streak">
+                <span className="block text-2xl font-black text-orange-400">🔥 {user.streakDays}</span>
+                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Day Streak</span>
+              </div>
+            )}
             <div className="text-center md:text-left group cursor-help" title="Collect points by voting, uploading, and commenting!">
               <div className="flex items-center gap-1.5 justify-center md:justify-start mb-[-2px]">
                 <div className="w-2.5 h-2.5 bg-yellow-500 rounded-full flex items-center justify-center text-[6px] text-black font-black">★</div>
@@ -272,6 +322,56 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
         </div>
       </div>
 
+      {/* Referral / Invite */}
+      <div className="mb-12 bg-gradient-to-br from-purple-900/30 to-pink-900/20 border border-purple-800/40 p-6 rounded-[32px] relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-40 h-40 bg-purple-600/10 blur-[60px]"></div>
+        <h3 className="bungee text-lg mb-1 flex items-center gap-2">
+          🎁 INVITE FRIENDS, GET CREDITS
+        </h3>
+        <p className="text-zinc-400 text-xs mb-4">
+          Share your code — they get <span className="text-green-400 font-bold">+5 credits</span>, you get <span className="text-purple-400 font-bold">+10 credits</span> for every signup.
+          {referralCount > 0 && <span className="text-zinc-300"> {referralCount} friend{referralCount === 1 ? '' : 's'} joined!</span>}
+        </p>
+
+        {user.referralCode && (
+          <div className="flex flex-col sm:flex-row gap-2 mb-4">
+            <div className="flex-1 flex items-center gap-2 bg-black/40 border border-zinc-700 rounded-2xl px-4 py-2.5">
+              <span className="text-sm font-black text-white tracking-wider select-all">{user.referralCode}</span>
+              <span className="ml-auto text-[9px] text-zinc-500 uppercase tracking-widest font-bold">Your code</span>
+            </div>
+            <button
+              onClick={handleCopyReferral}
+              className="bg-purple-600 hover:bg-purple-500 px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95"
+            >
+              {isCopied ? 'Copied!' : 'Copy Link'}
+            </button>
+          </div>
+        )}
+
+        {!user.referredBy && (
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="text"
+              value={referralCodeInput}
+              onChange={(e) => setReferralCodeInput(e.target.value)}
+              placeholder="Enter a friend's code (e.g. TRIPXXXX)"
+              className="flex-1 bg-black/40 border border-zinc-700 rounded-2xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-purple-500"
+              onKeyPress={(e) => e.key === 'Enter' && handleClaimReferral()}
+            />
+            <button
+              onClick={handleClaimReferral}
+              disabled={!referralCodeInput.trim() || isClaiming}
+              className="bg-zinc-800 hover:bg-zinc-700 px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all disabled:opacity-50"
+            >
+              {isClaiming ? 'Claiming...' : 'Claim +5'}
+            </button>
+          </div>
+        )}
+        {user.referredBy && (
+          <p className="text-[11px] text-green-400 font-bold uppercase tracking-widest">✓ Referral claimed</p>
+        )}
+      </div>
+
       {/* Play Store Promo */}
       <div className="mb-12 bg-gradient-to-r from-zinc-900 to-zinc-800 border border-zinc-800 p-6 rounded-[32px] flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden relative">
         <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
@@ -294,13 +394,27 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
       </div>
 
       {/* Grid of User's Videos */}
-      <h3 className="bungee text-xl mb-6 flex items-center gap-3">
-        MY TRIPS
+      <div className="flex items-center gap-3 mb-6">
+        <h3 className="bungee text-xl">MY CONTENT</h3>
         <div className="h-[2px] flex-1 bg-zinc-800"></div>
-      </h3>
+        <div className="flex gap-1 bg-zinc-900 rounded-full p-1 border border-zinc-800">
+          <button
+            onClick={() => setShowSaved(false)}
+            className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${!showSaved ? 'bg-purple-600 text-white' : 'text-zinc-400 hover:text-white'}`}
+          >
+            Trips
+          </button>
+          <button
+            onClick={() => setShowSaved(true)}
+            className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${showSaved ? 'bg-amber-600 text-white' : 'text-zinc-400 hover:text-white'}`}
+          >
+            Saved {savedVideos.length > 0 && `(${savedVideos.length})`}
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        {videos.map(v => (
+        {(showSaved ? savedVideos : videos).map(v => (
           <div key={v.id} className="group relative aspect-[9/16] bg-zinc-900 rounded-2xl overflow-hidden cursor-pointer">
             <img src={v.thumbnailUrl} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" alt={v.title} />
             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all flex flex-col justify-end p-4">
@@ -311,14 +425,18 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser })
             </div>
           </div>
         ))}
-        
-        {videos.length === 0 && (
+
+        {(showSaved ? savedVideos : videos).length === 0 && (
           <div className="col-span-full py-20 text-center bg-zinc-900 rounded-3xl border border-dashed border-zinc-800">
             <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto mb-4">
               <PlusIcon className="w-8 h-8 text-zinc-500" />
             </div>
-            <p className="text-zinc-500 mb-4 font-medium uppercase tracking-widest text-sm">No trips yet...</p>
-            <button className="bg-purple-600 px-8 py-3 rounded-full text-xs font-black uppercase tracking-widest hover:brightness-110 transition-all shadow-lg shadow-purple-600/20">Start Trippin'</button>
+            <p className="text-zinc-500 mb-4 font-medium uppercase tracking-widest text-sm">
+              {showSaved ? 'No saved trips yet...' : 'No trips yet...'}
+            </p>
+            <button className="bg-purple-600 px-8 py-3 rounded-full text-xs font-black uppercase tracking-widest hover:brightness-110 transition-all shadow-lg shadow-purple-600/20">
+              {showSaved ? 'Save trips you love' : "Start Trippin'"}
+            </button>
           </div>
         )}
       </div>

@@ -8,6 +8,9 @@ export interface User {
   hasAgreedToDisclaimer: boolean;
   points: number;
   credits: number;
+  referralCode?: string;
+  referredBy?: string | null;
+  streakDays?: number;
 }
 
 export interface Comment {
@@ -48,6 +51,7 @@ export interface Video {
   createdAt: string;
   hasVoted?: boolean;
   isAiGenerated?: boolean;
+  saved?: boolean;
 }
 
 export interface Message {

@@ -12,6 +12,12 @@ interface VideoFeedProps {
   onReact: (videoId: string, type: ReactionType) => void;
   onOpenProfile: (userId: string) => void;
   onShare: (video: Video) => void;
+  onToggleSave?: (videoId: string) => void;
+  onOpenUsername?: (username: string) => void;
+  onSelectTopic?: (tag: string | null) => void;
+  topics?: string[];
+  activeTopic?: string | null;
+  savedIds?: Set<string>;
   user: User | null;
   hasMore: boolean;
   loadingMore: boolean;
@@ -26,6 +32,12 @@ const VideoFeed: React.FC<VideoFeedProps> = ({
   onReact,
   onOpenProfile,
   onShare,
+  onToggleSave,
+  onOpenUsername,
+  onSelectTopic,
+  topics = [],
+  activeTopic = null,
+  savedIds,
   user,
   hasMore,
   loadingMore,
@@ -183,6 +195,27 @@ const VideoFeed: React.FC<VideoFeedProps> = ({
         </div>
       )}
 
+      {/* Trending topics row */}
+      {tab === 'foryou' && onSelectTopic && topics.length > 0 && (
+        <div className="w-full max-w-[420px] -mt-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+          <button
+            onClick={() => onSelectTopic(null)}
+            className={`shrink-0 text-xs font-bold rounded-full px-3.5 py-1.5 transition-all border ${!activeTopic ? 'bg-purple-600 text-white border-purple-500' : 'bg-zinc-800/80 text-zinc-300 border-zinc-700 hover:text-white'}`}
+          >
+            # All
+          </button>
+          {topics.map(tag => (
+            <button
+              key={tag}
+              onClick={() => onSelectTopic(activeTopic === tag ? null : tag)}
+              className={`shrink-0 text-xs font-bold rounded-full px-3.5 py-1.5 transition-all border ${activeTopic === tag ? 'bg-cyan-600 text-white border-cyan-500' : 'bg-zinc-800/80 text-zinc-300 border-zinc-700 hover:text-white'}`}
+            >
+              #{tag}
+            </button>
+          ))}
+        </div>
+      )}
+
       {showNotice && tab === 'foryou' && (
         <div className="w-full max-w-[420px] bg-zinc-900 border-2 border-dashed border-purple-500/50 rounded-3xl p-6 relative overflow-hidden group animate-in fade-in slide-in-from-top duration-500">
           <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-purple-600/10 blur-2xl rounded-full group-hover:bg-purple-600/20 transition-all"></div>
@@ -223,6 +256,10 @@ const VideoFeed: React.FC<VideoFeedProps> = ({
           onReact={onReact}
           onOpenProfile={onOpenProfile}
           onShare={onShare}
+          onToggleSave={onToggleSave}
+          onOpenUsername={onOpenUsername}
+          onSelectTopic={onSelectTopic || undefined}
+          savedIds={savedIds}
           user={user}
           reactionSummary={reactions[video.id]}
           userReactions={userReactions[video.id] || []}
