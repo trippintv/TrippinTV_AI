@@ -19,6 +19,7 @@ import PostComposer from './components/PostComposer';
 import { SkeletonFeed } from './components/Skeleton';
 import SearchOverlay from './components/SearchOverlay';
 import VideoGenerator from './components/VideoGenerator';
+import Background from './components/Background';
 import { User, Video, Post, ViewType, Comment, Message, ReactionType, ReactionSummary } from './types';
 import { supabase } from './src/lib/supabaseClient';
 import { apiFetch } from './src/lib/api';
@@ -813,6 +814,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col">
+        <Background />
         <Navbar 
           user={user} 
           onAuthClick={() => setIsAuthModalOpen(true)}
