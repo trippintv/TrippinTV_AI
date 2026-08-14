@@ -881,7 +881,7 @@ const App: React.FC = () => {
         {/* Admin Safety Link (Floating for Demo) */}
         <button 
           onClick={() => setCurrentView('safety')}
-          className="fixed bottom-4 right-4 z-[60] bg-red-600/20 hover:bg-red-600 text-[8px] font-black p-2 rounded-full border border-red-600/40 transition-all opacity-20 hover:opacity-100"
+          className="fixed bottom-20 right-4 md:bottom-4 z-[60] bg-red-600/20 hover:bg-red-600 text-[8px] font-black p-2 rounded-full border border-red-600/40 transition-all opacity-20 hover:opacity-100"
         >
           SAFETY LOGS
         </button>
