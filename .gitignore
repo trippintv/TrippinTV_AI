@@ -424,3 +424,8 @@ android/trippintv-release.keystore
 trippintv-release.keystore
 ..env.swp
 *.swp
+builds/
+
+# Play Store listing assets (regenerate with store-assets/generate_listing_assets.py)
+store-assets/*.png
+store-assets/fonts/
