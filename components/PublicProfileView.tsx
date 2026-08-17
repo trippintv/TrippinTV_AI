@@ -70,16 +70,24 @@ const PublicProfileView: React.FC<PublicProfileViewProps> = ({
     loadRelations();
   }, [loadProfile, loadRelations]);
 
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
+
   const act = async (url: string, method: string, body?: any) => {
     setBusy(true);
     try {
       const token = await getToken();
-      await fetch(url, {
+      const res = await apiFetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
         body: body ? JSON.stringify(body) : undefined,
       });
-      loadRelations();
+      if (res.ok) {
+        loadRelations();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.error || 'Something went wrong');
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -99,6 +107,11 @@ const PublicProfileView: React.FC<PublicProfileViewProps> = ({
 
   return (
     <div className="max-w-2xl mx-auto pb-10">
+      {toast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[70] bg-purple-600 text-white px-6 py-2 rounded-full text-sm font-bold shadow-lg">
+          {toast}
+        </div>
+      )}
       <div className="bg-zinc-900/60 rounded-[32px] border border-zinc-800 p-6 mb-6 flex flex-col sm:flex-row items-center gap-5">
         <img src={u.avatar} className="w-24 h-24 rounded-full border-2 border-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.3)]" alt="" />
         <div className="text-center sm:text-left flex-1">

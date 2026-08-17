@@ -739,13 +739,21 @@ const App: React.FC = () => {
     }
   };
 
-  const handleOpenUsername = (username: string) => {
+  const handleOpenUsername = async (username: string) => {
     const target = allUsers.find(u => u.username.toLowerCase() === username.toLowerCase());
     if (target) {
       handleOpenProfile(target.id);
-    } else {
-      showToast(`Couldn't find @${username}`, 'info');
+      return;
     }
+    try {
+      const res = await apiFetch(`/api/users/search?q=${encodeURIComponent(username)}`);
+      if (res.ok) {
+        const results = await res.json();
+        const match = results.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+        if (match) { handleOpenProfile(match.id); return; }
+      }
+    } catch {}
+    showToast(`Couldn't find @${username}`, 'info');
   };
 
   const handleSelectTopic = async (tag: string | null) => {
@@ -833,6 +841,7 @@ const App: React.FC = () => {
             onOpenProfile={handleOpenProfile}
             onSelectVideo={(id) => { setCurrentView('feed'); setIsSearchOpen(false); }}
             allUsers={allUsers}
+            currentUser={user}
           />
         )}
 
@@ -1044,13 +1053,13 @@ const App: React.FC = () => {
             <HomeIcon className="w-6 h-6" />
             <span className="text-[10px] mt-1">Home</span>
           </button>
+          <button onClick={() => setIsSearchOpen(true)} className="flex flex-col items-center text-zinc-400">
+            <SearchIcon className="w-6 h-6" />
+            <span className="text-[10px] mt-1">Search</span>
+          </button>
           <button onClick={() => setCurrentView('posts')} className={`flex flex-col items-center ${currentView === 'posts' ? 'text-purple-500' : 'text-zinc-400'}`}>
             <PostIcon className="w-6 h-6" />
             <span className="text-[10px] mt-1">Posts</span>
-          </button>
-          <button onClick={() => setCurrentView('leaderboard')} className={`flex flex-col items-center ${currentView === 'leaderboard' ? 'text-purple-500' : 'text-zinc-400'}`}>
-            <TrophyIcon className="w-6 h-6" />
-            <span className="text-[10px] mt-1">Winners</span>
           </button>
           <button onClick={() => user ? setIsUploadModalOpen(true) : setIsAuthModalOpen(true)} className="flex flex-col items-center text-zinc-400">
             <div className="bg-purple-600 rounded-lg p-1 text-white -mt-4 border-4 border-black shadow-lg">
@@ -1092,6 +1101,7 @@ const App: React.FC = () => {
 
 // Simple Icons
 const HomeIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>;
+const SearchIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>;
 const TrophyIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138z" /></svg>;
 const PlusIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>;
 const PostIcon = ({className}: {className:string}) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5l5 5v11a2 2 0 01-2 2z" /></svg>;

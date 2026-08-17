@@ -267,8 +267,9 @@ app.post('/api/referrals/claim', authenticateUser, async (req: any, res: any) =>
 
 // --- Friends ---
 const areFriends = async (a: string, b: string): Promise<boolean> => {
+  const [lo, hi] = [a, b].sort();
   const { count } = await db.from('Friendship').select('*', { count: 'exact', head: true })
-    .or(`userAId.eq.${a},userBId.eq.${a},userAId.eq.${b},userBId.eq.${b}`);
+    .eq('userAId', lo).eq('userBId', hi);
   return (count || 0) > 0;
 };
 
@@ -450,14 +451,17 @@ app.get('/api/friends', authenticateUser, async (req: any, res: any) => {
   }
 });
 
-app.get('/api/users/search', authenticateUser, async (req: any, res: any) => {
+app.get('/api/users/search', optionalUser, async (req: any, res: any) => {
   const { q } = req.query;
   if (!q) return res.json([]);
   try {
-    const blocked = await getBlockedIds(req.user.id);
     let { data: users } = await db.from('User').select('*')
-      .ilike('username', `%${q}%`).neq('id', req.user.id).limit(20);
-    if (blocked.length > 0) users = (users || []).filter((u: any) => !blocked.includes(u.id));
+      .ilike('username', `%${q}%`).limit(20);
+    if (req.user) {
+      users = (users || []).filter((u: any) => u.id !== req.user.id);
+      const blocked = await getBlockedIds(req.user.id);
+      if (blocked.length > 0) users = (users || []).filter((u: any) => !blocked.includes(u.id));
+    }
     res.json(users || []);
   } catch (error) {
     console.error(error);
