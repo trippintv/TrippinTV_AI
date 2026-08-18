@@ -6,6 +6,7 @@ import ReportModal from './ReportModal';
 import { useToast } from './Toast';
 import { apiFetch } from '../src/lib/api';
 import { supabase } from '../src/lib/supabaseClient';
+import UserBadge from './UserBadge';
 
 interface ProfileViewProps {
   user: User;
@@ -281,6 +282,8 @@ const ProfileView: React.FC<ProfileViewProps> = ({ user, videos, onUpdateUser, s
               <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Win Points</span>
             </div>
           </div>
+          
+          <UserBadge userId={user.id} />
           
           {isEditingBio ? (
             <div className="flex flex-col gap-2">

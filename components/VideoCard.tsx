@@ -123,6 +123,43 @@ const VideoCard: React.FC<VideoCardProps> = ({
   // Build flat + threaded comments
   const topLevel = video.comments.filter(c => !c.parentId);
   const repliesFor = (id: string) => video.comments.filter(c => c.parentId === id);
+  const [commentReactions, setCommentReactions] = useState<Record<string, { fire: number; laugh: number; skull: number; heart: number; eyes: number }>>({});
+
+  const loadCommentReactions = async (commentId: string) => {
+    try {
+      const res = await fetch(`/api/comments/${commentId}/reactions`);
+      if (res.ok) {
+        const data = await res.json();
+        setCommentReactions(prev => ({ ...prev, [commentId]: data.summary }));
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (showComments) {
+      video.comments.forEach(c => loadCommentReactions(c.id));
+    }
+  }, [showComments, video.comments.length]);
+
+  const toggleCommentReaction = async (commentId: string, type: string) => {
+    if (!user) return;
+    try {
+      const { supabase } = await import('../src/lib/supabaseClient');
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      await fetch(`/api/comments/${commentId}/react`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ type }),
+      });
+      loadCommentReactions(commentId);
+    } catch {}
+  };
+
+  const COMMENT_REACTIONS = [
+    { type: 'fire', emoji: '🔥' }, { type: 'laugh', emoji: '😂' }, { type: 'skull', emoji: '💀' },
+    { type: 'heart', emoji: '❤️' }, { type: 'eyes', emoji: '👀' },
+  ];
 
   const summary: ReactionSummary = reactionSummary || { fire: 0, laugh: 0, skull: 0, heart: 0, eyes: 0 };
 
@@ -288,14 +325,29 @@ const VideoCard: React.FC<VideoCardProps> = ({
                       <p className="text-sm text-zinc-200 leading-tight break-words">
                         <RichText text={c.text} onOpenUsername={onOpenUsername} onSelectTopic={onSelectTopic} />
                       </p>
-                      {user && (
-                        <button
-                          onClick={() => setReplyTo({ id: c.id, username: c.username })}
-                          className="text-[10px] text-zinc-500 hover:text-purple-400 mt-1 font-bold uppercase tracking-widest"
-                        >
-                          Reply
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2 mt-1">
+                        {user && (
+                          <button
+                            onClick={() => setReplyTo({ id: c.id, username: c.username })}
+                            className="text-[10px] text-zinc-500 hover:text-purple-400 font-bold uppercase tracking-widest"
+                          >
+                            Reply
+                          </button>
+                        )}
+                        {user && COMMENT_REACTIONS.map(r => {
+                          const count = (commentReactions[c.id] || {})[r.type as keyof typeof commentReactions[string]] || 0;
+                          return (
+                            <button
+                              key={r.type}
+                              onClick={() => toggleCommentReaction(c.id, r.type)}
+                              className={`flex items-center gap-0.5 text-[10px] px-1 py-0.5 rounded-full transition-all ${count > 0 ? 'bg-zinc-800 text-zinc-300' : 'text-zinc-600 hover:bg-zinc-800/50'}`}
+                            >
+                              <span>{r.emoji}</span>
+                              {count > 0 && <span>{count}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                   {/* Replies */}

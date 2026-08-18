@@ -118,10 +118,19 @@ export interface PublicProfile {
   followingCount: number;
 }
 
-export type ViewType = 'feed' | 'leaderboard' | 'profile' | 'upload' | 'chat' | 'friends' | 'notifications' | 'user' | 'posts';
+export type ViewType = 'feed' | 'leaderboard' | 'profile' | 'upload' | 'chat' | 'friends' | 'notifications' | 'user' | 'posts' | 'explore';
 
 export interface ViewState {
   view: ViewType;
   userId?: string;
   videoId?: string;
+}
+
+export interface UserLevel {
+  level: number;
+  name: string;
+  xp: number;
+  nextLevelXp: number;
+  progress: number;
+  badges: string[];
 }

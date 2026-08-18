@@ -3,6 +3,7 @@ import { User, Video, PublicProfile } from '../types';
 import { supabase } from '../src/lib/supabaseClient';
 import { apiFetch } from '../src/lib/api';
 import VideoCard from './VideoCard';
+import UserBadge from './UserBadge';
 import { Comment, ReactionType, ReactionSummary } from '../types';
 
 interface PublicProfileViewProps {
@@ -121,6 +122,9 @@ const PublicProfileView: React.FC<PublicProfileViewProps> = ({
             <span><b className="text-white">{profile.followerCount}</b> followers</span>
             <span><b className="text-white">{profile.followingCount}</b> following</span>
             <span><b className="text-white">{u.points}</b> pts</span>
+          </div>
+          <div className="mt-2">
+            <UserBadge userId={u.id} compact />
           </div>
         </div>
         {!isSelf && currentUser && (

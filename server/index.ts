@@ -917,6 +917,42 @@ app.post('/api/comments', authenticateUser, async (req: any, res: any) => {
   }
 });
 
+// --- Comment reactions ---
+app.post('/api/comments/:id/react', authenticateUser, async (req: any, res: any) => {
+  const { id: commentId } = req.params;
+  const { type } = req.body;
+  const userId = req.user.id;
+  if (!['fire', 'laugh', 'skull', 'heart', 'eyes'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
+  try {
+    const { data: existing } = await db.from('CommentReaction')
+      .select('id').eq('commentId', commentId).eq('userId', userId).eq('type', type).maybeSingle();
+    if (existing) {
+      await db.from('CommentReaction').delete().eq('id', existing.id);
+      return res.json({ toggled: false });
+    }
+    await db.from('CommentReaction').insert({ commentId, userId, type });
+    res.json({ toggled: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Reaction failed' });
+  }
+});
+
+app.get('/api/comments/:id/reactions', async (req: any, res: any) => {
+  const { id: commentId } = req.params;
+  try {
+    const { data } = await db.from('CommentReaction').select('type, userId').eq('commentId', commentId);
+    const summary = { fire: 0, laugh: 0, skull: 0, heart: 0, eyes: 0 };
+    const userReactions: string[] = [];
+    for (const r of (data || [])) {
+      summary[r.type as keyof typeof summary] = (summary[r.type as keyof typeof summary] || 0) + 1;
+    }
+    res.json({ summary, count: (data || []).length });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load reactions' });
+  }
+});
+
 // --- Messages ---
 app.get('/api/messages/:u1/:u2', authenticateUser, async (req: any, res: any) => {
   const { u1, u2 } = req.params;
@@ -1437,9 +1473,107 @@ const TERMS_HTML = `
 <p>We may update these Terms from time to time. Continued use after changes constitutes acceptance. Questions: <b>privacy@trippintv.tv</b></p>
 </div></body></html>`;
 
+// --- Push notifications (FCM stub — requires Firebase project setup) ---
+app.post('/api/push/register', authenticateUser, async (req: any, res: any) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'FCM token required' });
+  try {
+    await db.from('User').update({ fcmToken: token }).eq('id', req.user.id);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to register push token' });
+  }
+});
+
+// --- Video duets ---
+app.get('/api/videos/:id/duets', async (req: any, res: any) => {
+  try {
+    const { data } = await db.from('Video').select('*').eq('duetOfVideoId', req.params.id).order('createdAt', { ascending: false });
+    res.json(data || []);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load duets' });
+  }
+});
+
+// --- User levels & badges ---
+const LEVELS = [
+  { level: 1, name: 'Newcomer', xp: 0, badge: null },
+  { level: 2, name: 'Trippin\' Rookie', xp: 50, badge: '🌱' },
+  { level: 3, name: 'Video Voyager', xp: 200, badge: '🎬' },
+  { level: 4, name: 'Vote Veteran', xp: 500, badge: '🔥' },
+  { level: 5, name: 'Content Creator', xp: 1000, badge: '⭐' },
+  { level: 6, name: 'Trip Master', xp: 2500, badge: '🏆' },
+  { level: 7, name: 'Streak Legend', xp: 5000, badge: '💎' },
+  { level: 8, name: 'Trippin\' Titan', xp: 10000, badge: '👑' },
+  { level: 9, name: 'Internet Famous', xp: 25000, badge: '🌟' },
+  { level: 10, name: 'Trippin\' God', xp: 50000, badge: '🦁' },
+];
+
+app.get('/api/users/:id/level', async (req: any, res: any) => {
+  try {
+    const { data: user } = await db.from('User').select('points, streakDays, createdAt').eq('id', req.params.id).single();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const xp = user.points || 0;
+    let current = LEVELS[0];
+    let next = LEVELS[1];
+    for (let i = LEVELS.length - 1; i >= 0; i--) {
+      if (xp >= LEVELS[i].xp) {
+        current = LEVELS[i];
+        next = LEVELS[i + 1] || LEVELS[i];
+        break;
+      }
+    }
+    const progress = next.xp > current.xp ? (xp - current.xp) / (next.xp - current.xp) : 1;
+    const badges: string[] = [];
+    if (current.badge) badges.push(current.badge);
+    if ((user.streakDays || 0) >= 7) badges.push('🔥');
+    if ((user.streakDays || 0) >= 30) badges.push('💫');
+    const daysSinceCreation = Math.floor((Date.now() - new Date(user.createdAt).getTime()) / 86400000);
+    if (daysSinceCreation >= 365) badges.push('🎂');
+    res.json({ level: current.level, name: current.name, xp, nextLevelXp: next.xp, progress: Math.min(progress, 1), badges });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load level' });
+  }
+});
+
 // --- 4. START ---
 const distPath = path.resolve(process.cwd(), 'dist');
 app.use(express.static(distPath));
+
+// --- Video share page with OG meta tags ---
+app.get('/v/:id', async (req, res) => {
+  try {
+    const { data: video } = await db.from('Video').select('id, title, description, username, thumbnailUrl, videoUrl').eq('id', req.params.id).single();
+    if (!video) return res.sendFile(path.join(distPath, 'index.html'));
+    const title = `${video.title} by @${video.username} | Trippin' TV`;
+    const desc = video.description || 'Check out this trippy video on Trippin\' TV!';
+    const thumb = video.thumbnailUrl || `${req.protocol}://${req.get('host')}/icon-512.png`;
+    const url = `${req.protocol}://${req.get('host')}/v/${video.id}`;
+    const html = `<!DOCTYPE html><html><head>
+<meta charset="utf-8"><title>${title}</title>
+<meta property="og:type" content="video.other" />
+<meta property="og:title" content="${title}" />
+<meta property="og:description" content="${desc}" />
+<meta property="og:image" content="${thumb}" />
+<meta property="og:url" content="${url}" />
+<meta property="og:site_name" content="Trippin' TV" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="${title}" />
+<meta name="twitter:description" content="${desc}" />
+<meta name="twitter:image" content="${thumb}" />
+<meta name="al:android:url" content="trippintv://v/${video.id}" />
+<meta name="al:android:package" content="tv.trippin.app" />
+<meta name="al:android:app_name" content="Trippin' TV" />
+<meta name="theme-color" content="#000000" />
+<link rel="alternate" href="trippintv://v/${video.id}" />
+</head><body>
+<script>window.location.href='trippintv://v/${video.id}' || '/';</script>
+</body></html>`;
+    res.type('html').send(html);
+  } catch {
+    res.sendFile(path.join(distPath, 'index.html'));
+  }
+});
 
 app.get('/privacy', (_req, res) => {
   res.type('html').send(PRIVACY_POLICY_HTML);
